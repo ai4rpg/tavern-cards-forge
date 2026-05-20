@@ -1,0 +1,35 @@
+{
+  "name": "tavern-cards-forge",
+  "version": "0.1.0",
+  "description": "CLI tool for offline packing/unpacking SillyTavern character cards and worldbooks",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "tavern-cards-forge": "./dist/index.mjs"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch"
+  },
+  "dependencies": {
+    "commander": "^13",
+    "crc": "^4",
+    "fast-json-patch": "^3.1.1",
+    "jiti": "^2.7.0",
+    "jsonpath-plus": "^10.4.0",
+    "lodash": "^4",
+    "png-chunk-text": "^1",
+    "png-chunks-extract": "^1",
+    "yaml": "^2.8.4",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/lodash": "^4",
+    "@types/node": "^22",
+    "tsup": "^8",
+    "typescript": "^5.7"
+  }
+}

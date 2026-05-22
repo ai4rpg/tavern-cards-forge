@@ -191,6 +191,10 @@ tavern-cards-forge init <project> [选项]
 | 选项 | 说明 |
 |------|------|
 | `--state <path>` | 直接指定 state.json 路径（跳过项目查找） |
+| `--worldbook` | 创建或更新为独立世界书项目（`form: "worldbook"`, `mvu: false`） |
+| `--mvu` | 创建或更新为 MVU 角色卡项目（`form: "charactercard"`, `mvu: true`） |
+
+`--worldbook` 和 `--mvu` 不能同时使用，因为 worldbook 项目不允许启用 MVU。两者都不提供时，新建 state 默认使用 `form: "charactercard"`、`mvu: false`；更新已有 state 时不改变现有的 `form` / `mvu`。
 
 **行为：**
 

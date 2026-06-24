@@ -93,15 +93,15 @@ tavern-cards-forge pack <project> [选项]
 tavern-cards-forge pack <project>
 
 # 覆盖输出路径
-tavern-cards-forge pack <project> --output /tmp/test.png
+tavern-cards-forge pack <project> --output ./dist/MyCharacter.png
 
 # 未注册项目时，使用占位符并同时提供输入和输出
 tavern-cards-forge pack temp \
-  --state ./cards/MyChar/tavern-cards-state.json \
-  --output ./dist/MyChar.png
+  --state ./cards/MyCharacter/tavern-cards-state.json \
+  --output ./dist/MyCharacter.png
 
 # 仅提供 --state 而没有 --output 会失败
-tavern-cards-forge pack temp --state ./cards/MyChar/tavern-cards-state.json
+tavern-cards-forge pack temp --state ./cards/MyCharacter/tavern-cards-state.json
 ```
 
 ### unpack
@@ -219,33 +219,40 @@ tavern-cards-forge validate-mvu <project> [选项]
 | 选项 | 说明 |
 |------|------|
 | `--state <path>` | 直接指定 state.json 路径（跳过项目查找） |
+| `--initvar <path>` | 指定要校验的 initvar YAML 文件路径；绝对路径直接使用，相对路径基于当前工作目录解析；未提供时默认校验项目根目录下的 `世界书/变量/initvar.yaml` |
 
 **前置条件：**
 
 - `tavern-cards-state.json` 中 `mvu: true`
 - 项目根目录存在 `schema.ts`，导出 Zod `Schema`
-- `世界书/变量/initvar.yaml` 已编写
+- 待校验的 initvar YAML 文件已编写（未提供 `--initvar` 时默认 `./cards/MyCharacter/世界书/变量/initvar.yaml`）
 
 **行为：**
 
 1. 读取 state.json，检查 `mvu === true`
 2. 用 jiti 加载 `schema.ts`，注入全局 `z`（Zod v4）和 `_`（lodash）
    - 单文件产物已内置 jiti、Zod 和 lodash；项目自己的 `schema.ts` 应使用全局 `z` / `_`，不要依赖本地 `node_modules` 中的 `import { z } from 'zod'`
-3. 解析 `世界书/变量/initvar.yaml`
+3. 解析指定的 initvar YAML 文件
 4. 用 Schema 校验 YAML 数据
 5. 校验通过打印成功信息，失败打印详细错误路径和原因
 
 **示例：**
 
 ```bash
+# 校验默认 initvar
 tavern-cards-forge validate-mvu <project>
-tavern-cards-forge validate-mvu <project> --state ./cards/MyChar/tavern-cards-state.json
+
+# 指定 state 路径
+tavern-cards-forge validate-mvu <project> --state ./cards/MyCharacter/tavern-cards-state.json
+
+# 校验额外开场白的 initvar_override
+tavern-cards-forge validate-mvu <project> --initvar ./cards/MyCharacter/开场白/initvar/1.yaml
 ```
 
 **输出示例（成功）：**
 
 ```
-validate-mvu: initvar.yaml 校验通过
+validate-mvu: ./cards/MyCharacter/开场白/initvar/1.yaml 校验通过
 ```
 
 **输出示例（失败）：**
@@ -308,7 +315,7 @@ tavern-cards-forge query <project> '$.extensions.talkativeness'
 tavern-cards-forge query <project> '$.typeLists' --format yaml
 
 # 使用 --state 跳过项目查找
-tavern-cards-forge query temp '$.projectName' --state ./cards/MyChar/tavern-cards-state.json
+tavern-cards-forge query temp '$.projectName' --state ./cards/MyCharacter/tavern-cards-state.json
 ```
 
 ### patch

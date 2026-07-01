@@ -1,10 +1,53 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import * as yaml from 'yaml';
+import jschardet from 'jschardet';
 import type { TavernCardsState } from '../type/state.js';
 
+const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
+
 export function readFileText(path: string): string {
-  return readFileSync(path, 'utf-8').replace(/\r\n/g, '\n');
+  const buf = readFileSync(path);
+
+  const { encoding, confidence } = jschardet.detect(buf);
+
+  if (encoding && encoding !== 'UTF-8' && encoding !== 'ascii') {
+    if (confidence >= 0.7) {
+      throw new EncodingError(path, encoding, confidence);
+    }
+    if (confidence > 0) {
+      EncodingError.warn(path, encoding, confidence);
+    }
+  }
+
+  const hasBom = buf.length >= 3 && buf[0] === UTF8_BOM[0] && buf[1] === UTF8_BOM[1] && buf[2] === UTF8_BOM[2];
+  const text = (hasBom ? buf.subarray(3) : buf).toString('utf-8');
+
+  // Fallback for files too short for jschardet to detect
+  if (text.includes('�')) {
+    throw new EncodingError(path, 'unknown (possibly GBK/GB2312)', 0);
+  }
+
+  return text.replace(/\r\n/g, '\n');
+}
+
+export class EncodingError extends Error {
+  constructor(filePath: string, detected: string, confidence: number) {
+    const confStr = confidence > 0 ? ` (confidence: ${(confidence * 100).toFixed(0)}%)` : '';
+    super(
+      `Encoding error: "${filePath}" is ${detected}${confStr}, expected UTF-8.\n` +
+      'Please re-save the file as UTF-8 and try again.',
+    );
+    this.name = 'EncodingError';
+  }
+
+  static warn(filePath: string, detected: string, confidence: number): void {
+    const confStr = confidence > 0 ? ` (confidence: ${(confidence * 100).toFixed(0)}%)` : '';
+    console.warn(
+      `Warning: "${filePath}" may be ${detected}${confStr}. ` +
+      'If the content looks garbled, re-save the file as UTF-8.',
+    );
+  }
 }
 
 export function writeFileRecursive(path: string, content: string | Buffer): void {

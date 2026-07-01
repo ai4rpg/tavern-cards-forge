@@ -22,6 +22,7 @@ export default defineConfig({
     'crc',
     'fast-json-patch',
     'jiti',
+    'jschardet',
     'lodash',
     'png-chunk-text',
     'png-chunks-extract',

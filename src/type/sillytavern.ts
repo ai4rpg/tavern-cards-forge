@@ -9,7 +9,7 @@ export type { SillyTavernCharacterBook } from './character-book.js';
 
 export type { SillyTavernRegexScript } from './regex-script.js';
 
-export type { SillyTavernTavernHelper, SillyTavernTavernHelperTuple, SillyTavernTavernHelperObject, SillyTavernTavernHelperScript } from './tavern-helper.js';
+export type { SillyTavernTavernHelper, SillyTavernTavernHelperScript } from './tavern-helper.js';
 
 export type { SillyTavernCharacter, CharacterData, CharacterExtensions, Asset } from './character.js';
 export { isCharacterV2, isCharacterV3, isCharacter } from './character.js';

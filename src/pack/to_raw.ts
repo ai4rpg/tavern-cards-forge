@@ -1,4 +1,4 @@
-import type { SillyTavernEntry, SillyTavernCharacter, SillyTavernTavernHelperTuple, SillyTavernRegexScript, NumericPosition, NumericRole, NumericSelectiveLogic } from '../type/sillytavern.js';
+import type { SillyTavernEntry, SillyTavernCharacter, SillyTavernTavernHelper, SillyTavernRegexScript, NumericPosition, NumericRole, NumericSelectiveLogic } from '../type/sillytavern.js';
 import type { EntryManifestLeaf, TavernHelper, RegexScript } from '../type/state.js';
 import type { CardrcConfig } from '../type/settings.js';
 
@@ -33,13 +33,13 @@ function toSillyTavernRegexScripts(scripts: Record<string, RegexScript>): SillyT
   }));
 }
 
-function convertTavernHelperToRaw(stateHelper: TavernHelper | undefined): SillyTavernTavernHelperTuple | undefined {
+function convertTavernHelperToRaw(stateHelper: TavernHelper | undefined): SillyTavernTavernHelper | undefined {
   if (!stateHelper) return undefined;
 
-  const result: any[] = [];
+  const result: SillyTavernTavernHelper = {};
 
   if (stateHelper.scripts !== undefined) {
-    const scriptsArray = Object.entries(stateHelper.scripts).map(([name, s]) => ({
+    result.scripts = Object.entries(stateHelper.scripts).map(([name, s]) => ({
       type: s.type,
       enabled: s.enabled,
       id: s.id,
@@ -49,14 +49,13 @@ function convertTavernHelperToRaw(stateHelper: TavernHelper | undefined): SillyT
       ...(s.button ? { button: s.button } : {}),
       ...(s.data ? { data: s.data } : {}),
     }));
-    result.push(['scripts', scriptsArray]);
   }
 
   if (stateHelper.variables !== undefined) {
-    result.push(['variables', stateHelper.variables]);
+    result.variables = stateHelper.variables;
   }
 
-  return result as SillyTavernTavernHelperTuple;
+  return result;
 }
 
 export function toSillyTavernEntry(

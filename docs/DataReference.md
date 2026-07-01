@@ -282,6 +282,10 @@ TavernHelper 扩展配置。
 | `TavernHelperScript` | `content` ↔ `script_file` | 二选一，不能同时存在或都为空 |
 | `TavernCardsState` | `form` + `mvu` | `form=worldbook` 时 `mvu` 必须为 `false` |
 
+**运行时编码检测**：
+
+除 Zod schema 验证外，所有内容文件在读取时还会进行编码检测（`src/util/file_io.ts:readFileText`）。非 UTF-8 文件（如 GBK/GB2312）会被拦截并报 `EncodingError`，Windows 记事本默认的 UTF-8 BOM 会被自动剥离。详见 [机制原理](Mechanisms.md#编码检测)。
+
 **验证失败示例：**
 
 ```json

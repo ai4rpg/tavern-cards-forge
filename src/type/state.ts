@@ -191,7 +191,7 @@ export const TavernCardsState = z.object({
 }).superRefine((data, ctx) => {
   if (data.form === 'worldbook' && data.mvu) {
     ctx.addIssue({
-      code: z.ZodIssueCode.custom,
+      code: 'custom',
       path: ['mvu'],
       message: 'worldbook 时 mvu 必须为 false',
     });

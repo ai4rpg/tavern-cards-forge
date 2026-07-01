@@ -16,6 +16,7 @@
   - [验证提醒](#验证提醒)
 - [格式检测](#格式检测)
 - [MVU 自动检测](#mvu-自动检测)
+- [编码检测](#编码检测)
 
 ## configure 推导算法
 
@@ -201,14 +202,35 @@ pack 时根据 `form` 和 `avatar` 字段选择输出格式：
 
 ## MVU 自动检测
 
-unpack 时自动检测角色卡是否为 MVU 项目。检测在 `characterMeta` 合并后、内容文件写出前执行（此时 `TavernHelperScript.content` 尚未被写出为文件）。
+**unpack** 和 **pack** 时均会检测角色卡的 MVU 特征，检测逻辑集中在 `src/util/detect_mvu.ts`。
 
-**检测条件**（三个同时满足时 `mvu = true`）：
+- **unpack**：检测在 `characterMeta` 合并后、内容文件写出前执行（此时 `TavernHelperScript.content` 尚未被写出为文件，可直接检测内存中的内容）。满足条件时自动设置 `mvu = true`。
+- **pack**：当 `state.mvu === true` 时触发校验。若 `tavern_helper.scripts` 使用了 `script_file`，pack 会先解析文件内容写入脚本对象，再调用 `detectMvu()` 验证，不满足条件则报错退出（不自动修正 `mvu`）。
+
+**检测条件**（三个同时满足）：
 
 1. `form === 'charactercard'`
-2. 某个 `TavernHelperScript.content` 同时包含 `"import"` 和 `"MagicalAstrogy/MagVarUpdate"`
+2. 某个**已启用**（`enabled !== false`）的 `TavernHelperScript.content` 同时包含 `"import"` 和 `"MagicalAstrogy/MagVarUpdate"`
 3. `entryManifest` 中存在以 `[InitVar]` 开头的条目名（不区分大小写）
 
-**不满足时**：`mvu` 保持默认值 `false`。
+**pack 校验**：若 `state.mvu === true` 但上述条件不满足，pack 抛出错误阻止打包。`mvu` 由创作者在项目初始化时通过 `init --mvu` 设定或在 state.json 中手动编辑，pack 不会自动修改。
 
-**Zod 校验**：`TavernCardsState` schema 通过 `superRefine` 约束 `form=worldbook` 时 `mvu` 必须为 `false`，违反时校验失败。
+## 编码检测
+
+所有文件读取通过 `readFileText` 函数（`src/util/file_io.ts`），自动检测文件编码：
+
+1. **jschardet 检测**：读取 Buffer，用 jschardet 推断编码类型
+2. **非 UTF-8 拦截**：
+   - 置信度 ≥ 0.7 → 抛出 `EncodingError`，阻止操作（常见于 GBK/GB2312 文件）
+   - 置信度 > 0 但 < 0.7 → 输出警告 `"Warning: ... may be GB2312 ..."`，不阻止读取
+3. **BOM 剥离**：自动剥离 UTF-8 BOM（`EF BB BF`），修复 Windows 记事本默认添加 BOM 导致的 `﻿` 残留问题
+4. **置换字符兜底**：文件过短无法检测时，检查 UTF-8 解码结果是否含 `�`（U+FFFD），含则报错
+
+**常见触发场景**：中文 Windows 用户用默认 GBK（cp936）编码保存 `.txt` 文件。错误信息示例：
+
+```
+Encoding error: "世界书/角色基本.txt" is GB2312 (confidence: 99%), expected UTF-8.
+Please re-save the file as UTF-8 and try again.
+```
+
+**注意**：JSON 文件（`tavern-cards-state.json`、`.cardrc.json`、patch 文件）要求 UTF-8，这是 JSON 标准规范，不在此检测范围内。

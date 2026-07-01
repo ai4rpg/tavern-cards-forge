@@ -10,29 +10,12 @@ import type { SillyTavernEntry, SillyTavernTavernHelper, FlatWorldbookEntry } fr
 import type { TavernCardsState, TavernHelper, EntryManifestLeaf } from '../type/state.js';
 import { resolveProject, ProjectNotFoundError, requireConfiguredProject } from '../cli/settings.js';
 import { stripCharaChunks } from '../pack/png_encode.js';
+import { detectMvu } from '../util/detect_mvu.js';
 
 const DIR_ENTRIES = '世界书';
 const DIR_REGEX = '正则';
 const DIR_SCRIPTS = '脚本';
 const DIR_GREETINGS = '开场白';
-
-function detectMvu(state: TavernCardsState): boolean {
-  if (state.form !== 'charactercard') return false;
-
-  const scripts = state.extensions?.tavern_helper?.scripts;
-  const hasMvuScript = scripts && Object.values(scripts).some(script => {
-    const content = script.content ?? '';
-    return content.includes('import') && content.includes('MagicalAstrogy/MagVarUpdate');
-  });
-  if (!hasMvuScript) return false;
-
-  const hasInitVar = Object.values(state.entryManifest).some(typeEntries =>
-    Object.keys(typeEntries).some(name => /^\[InitVar\]/i.test(name)),
-  );
-  if (!hasInitVar) return false;
-
-  return true;
-}
 
 function convertRegexScriptsToState(raw: any[] | undefined): Record<string, any> | undefined {
   if (!raw || !Array.isArray(raw)) return undefined;

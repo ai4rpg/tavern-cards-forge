@@ -78,13 +78,15 @@ tavern-cards-forge pack <project> [选项]
    - `first_messages[]`
 
    若有缺失文件，列出清单并退出
-3. 解析所有条目，加载 `path` 或 `contents` 引用的内容文件；同时加载 `replace_file` / `script_file` 引用的文件内容
-4. 将 EntryManifestLeaf 转换为 SillyTavern 原始格式
-5. 根据 `form` 字段和 `avatar` 字段选择输出格式：
+3. **编码检测**：读取每个内容文件时自动检测编码，非 UTF-8 文件报错退出（详见 [机制原理](Mechanisms.md#编码检测)）
+4. **MVU 验证**：若 `state.mvu === true`，验证项目中确实存在 MVU 特征（启用的 `tavern_helper.scripts` 中引用了 `MagicalAstrogy/MagVarUpdate` + `entryManifest` 中存在 `[InitVar]` 条目），不满足则报错退出（详见 [机制原理](Mechanisms.md#mvu-自动检测)）
+5. 解析所有条目，加载 `path` 或 `contents` 引用的内容文件；同时加载 `replace_file` / `script_file` 引用的文件内容
+6. 将 EntryManifestLeaf 转换为 SillyTavern 原始格式
+7. 根据 `form` 字段和 `avatar` 字段选择输出格式：
    - `form=worldbook` → 输出 JSON（扁平格式独立世界书）
    - `form=charactercard` 且 `avatar` 非空 → 输出 PNG（嵌入角色卡元数据 + 标准格式世界书）
    - `form=charactercard` 且 `avatar` 为空 → 输出 JSON（标准格式角色卡）
-6. 输出路径优先级：`--output` > 项目 `artifact` > state 同目录下 `{name}.json` / `{name}.png`
+8. 输出路径优先级：`--output` > 项目 `artifact` > state 同目录下 `{name}.json` / `{name}.png`
 
 **示例：**
 

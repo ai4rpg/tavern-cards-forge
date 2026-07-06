@@ -15,7 +15,11 @@
   - [备份与回滚](#备份与回滚)
   - [验证提醒](#验证提醒)
 - [格式检测](#格式检测)
-- [MVU 自动检测](#mvu-自动检测)
+- [MVU 支持](#mvu-支持)
+  - [MVU 检测](#mvu-检测)
+  - [pack 时 MVU 校验](#pack-时-mvu-校验)
+  - [Zod 脚本同步](#zod-脚本同步)
+  - [initvar_override 嵌入与提取](#initvar_override-嵌入与提取)
 - [编码检测](#编码检测)
 
 ## configure 推导算法
@@ -200,7 +204,11 @@ pack 时根据 `form` 和 `avatar` 字段选择输出格式：
 | `form=charactercard` + `avatar` 非空 | PNG（嵌入 chara/ccv3 tEXt chunk） |
 | `form=charactercard` + `avatar` 为空 | 标准格式角色卡 JSON |
 
-## MVU 自动检测
+## MVU 支持
+
+工具支持两种 MVU 方案：**MVU**（基于 MagVarUpdate 脚本）和 **MVU Zod**（基于 MagVarUpdate + Zod schema 变量校验，需同时使用两个脚本）。两者共享同一 `mvu` 字段和 [InitVar] 条目约定；initvar_override 机制对两种方案均有效。
+
+### MVU 检测
 
 **unpack** 和 **pack** 时均会检测角色卡的 MVU 特征，检测逻辑集中在 `src/util/detect_mvu.ts`。
 
@@ -213,7 +221,69 @@ pack 时根据 `form` 和 `avatar` 字段选择输出格式：
 2. 某个**已启用**（`enabled !== false`）的 `TavernHelperScript.content` 同时包含 `"import"` 和 `"MagicalAstrogy/MagVarUpdate"`
 3. `entryManifest` 中存在以 `[InitVar]` 开头的条目名（不区分大小写）
 
-**pack 校验**：若 `state.mvu === true` 但上述条件不满足，pack 抛出错误阻止打包。`mvu` 由创作者在项目初始化时通过 `init --mvu` 设定或在 state.json 中手动编辑，pack 不会自动修改。
+### pack 时 MVU 校验
+
+`state.mvu === true` 时 pack 依次执行以下校验，全部通过才继续打包：
+
+1. **MVU 特征检测**（见上节） — 必须满足三个检测条件
+2. **[InitVar] 条目禁用校验** — 所有以 `[InitVar]` 开头的条目必须显式设置 `enabled: false`（SillyTavern 默认启用，运行时不应激活这些仅用于变量定义的条目）
+3. **schema.ts 预检** — 仅在项目根目录**有** `schema.ts` 时触发（[`checkSchemaTsContent`](../src/util/mvu_schema.ts)）：
+   - `schema.ts` 不得包含任何 `import` 语句。`z`（Zod v4）与 `_`（lodash）已由 MVU 运行时作为全局注入，无需也不能 `import`；forge **不打包**额外 npm 包，因此裸模块 / 相对路径 / 绝对路径的 `import` 都会在浏览器解析阶段失败
+   - 命中即整体终止并打印违法 import 列表，提示用户删除（**不要** `npm install`）
+4. **Zod 脚本内容校验** — `schema.ts` 存在与否均触发（[`validateZodScriptContent`](../src/util/mvu_schema.ts)）：
+   - `schema.ts` 存在时：用 [`buildZodScriptFromSchemaTs`](../src/util/mvu_schema.ts) 同步生成后的 Zod 脚本作为校验对象。此产物已剔除 `export type` 行，所以 `typeExport` 永不命中；但 `schema.ts` 自身的裸 `import`（如 `import { z } from 'zod'`、`import _ from 'lodash'`）会被原样保留进同步后的脚本，运行时崩溃，因此必须在校验前由步骤 3 拦截
+   - `schema.ts` 不存在时：直接校验磁盘上 `脚本/{name}.txt`（即 `script.script_file` / `script.content` 指向的原样内容），`typeExport` 与各 import 检查均生效
+   - 检查项（均会阻止打包）：
+     - `import ... from 'zod'`：裸模块标识符（bare module specifier）无法在浏览器中解析；删除该 import，`z` 已作为 MVU 运行时全局
+     - `import ... from 'lodash'`：同上，删除该 import，`_` 已作为全局
+     - 其他**非 URL** import（裸模块名 / 相对路径 / 绝对路径）：仅有 `https://` / `//` 开头的 CDN URL import 合法
+     - `export type ...`：TypeScript 语法不是合法 JavaScript，会触发 `SyntaxError`
+   - 错误信息由 [`formatZodScriptValidationErrors`](../src/util/mvu_schema.ts) 渲染，会附带命中的具体 import 语句
+5. **initvar 一致性校验** — 仅在项目根目录**有** `schema.ts` 时触发（[`validateMvuInitvar`](../src/util/mvu_schema.ts)）：
+   - 校验 `entryManifest` 中 `[InitVar]` 条目的 YAML 内容是否匹配 `schema.ts` 定义的 Zod Schema
+   - 校验 `initvar_overrides` 中所有 override YAML 文件同样匹配该 Schema
+   - 内部先执行步骤 3 的 schema.ts import 预检；pack 流程已读好 `schema.ts` 内容时会经 `options.schemaContent` 传入，避免对每个 override 重复读盘
+
+校验逻辑分布在 `src/util/detect_mvu.ts`（MVU 检测、禁用校验）和 `src/util/mvu_schema.ts`（Zod 脚本校验、initvar 一致性校验）。
+
+### Zod 脚本同步
+
+MVU Zod 方案中，`schema.ts` 是变量 Schema 的单一数据源，Zod 脚本（`tavern_helper.scripts` 中引用 `mvu_zod.js` 的脚本）从 `schema.ts` 自动生成。
+
+**pack 方向**（`buildZodScriptFromSchemaTs`）：
+1. [`resolveSchemaSyncInput`](../src/util/mvu_schema.ts) 一次性完成「读 `schema.ts` + 检测启用 Zod 脚本的 `registerMvuSchema` CDN import URL + 生成同步后 Zod 脚本内容」，供后续 [build](../src/pack/build.ts) 同步与 [pack/index.ts](../src/pack/index.ts) 校验复用，避免两步各自重复读盘 / 重复 detect
+   - 检测 import URL 时同时支持 `script_file` 引用与内联 `content` 两种脚本表达方式（接受可选的 `resolveContent` 回调，调用方用它在循环外将 `script_file` 解析为文件内容，避免循环内重复读盘）
+   - 多个启用 Zod 脚本时取第一个的 import URL；保留 URL 是为了透明保留不同 jsdelivr CDN 域名，避免默认域名覆盖项目自选域名
+2. 生成 Zod 脚本内容：
+   - 移除 `export type` 行（TypeScript 语法在浏览器中不合法）
+   - 在顶部添加 `registerMvuSchema` 的 CDN import
+   - 在底部添加 `$(() => { registerMvuSchema(Schema); });` 注册调用
+3. 替换脚本的 `content` 字段为生成内容（`schema.ts` 不存在时原样透传）
+
+**unpack 方向**（`extractSchemaTsFromScript`）：
+1. 收集所有启用的 Zod 脚本（存在多个时取第一个，并警告其余可能被禁用）
+2. 逆向提取 `schema.ts`：
+   - 移除 `registerMvuSchema` 的 import 行
+   - 移除 `$(() => { ... })` 注册块
+   - 在文件末尾添加 `export type Schema = z.output<typeof Schema>;`
+3. 写入 `schema.ts` 到项目根目录
+
+**压缩/编译脚本处理**：若 Zod 脚本为压缩产物（包含 `sourceMappingURL`、import 别名或超长单行），`extractSchemaTsFromScript` 返回 `null`，unpack 跳过自动提取，提示用户手动编写 `schema.ts`。
+
+### initvar_override 嵌入与提取
+
+不同开场白（`first_messages`）可以携带独立的 initvar YAML，用于在开场白期间临时覆盖变量初始值。数据格式为 `<UpdateVariable><initvar>` 包裹的 YAML 块。`initvar_overrides` 字段以 `Record<开场白路径, override YAML 路径>` 形式记录映射。
+
+**pack 方向**（`embedInitvarOverrideInGreeting`）：
+1. 读取 `state.initvar_overrides[greetingKey]` 指向的 YAML 文件
+2. 若开场白已有 `<UpdateVariable><initvar>` 块，先移除旧块
+3. 在结尾追加新块：`\n\n<UpdateVariable>\n<initvar>\n{yaml内容}\n</initvar>\n</UpdateVariable>`
+
+**unpack 方向**（`extractInitvarOverrideFromGreeting`）：
+1. 检测开场白内容中的 `<UpdateVariable><initvar>` 块
+2. 将 YAML 内容写入 `开场白/initvar/{index}.yaml`
+3. 移除块后，清理后的内容写入 `开场白/{index}.txt`
+4. 填充 `state.initvar_overrides["开场白/{index}.txt"] = "开场白/initvar/{index}.yaml"`
 
 ## 编码检测
 

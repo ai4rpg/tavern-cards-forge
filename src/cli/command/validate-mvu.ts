@@ -1,13 +1,8 @@
 import { Command } from 'commander';
-import { resolve, dirname, isAbsolute } from 'node:path';
-import { existsSync } from 'node:fs';
-import { createJiti } from 'jiti/static';
-import * as z from 'zod';
-import * as _ from 'lodash';
-import * as yaml from 'yaml';
+import { dirname, resolve, isAbsolute } from 'node:path';
 import { resolveProject } from '../settings.js';
 import { readFileText } from '../../util/file_io.js';
-import { detailedParse } from '../../util/prettified_parse.js';
+import { validateMvuInitvar } from '../../util/mvu_schema.js';
 
 export function registerValidateMvu(program: Command, exitOnError: (fn: (...args: any[]) => Promise<void>) => (...args: any[]) => Promise<void>) {
   program
@@ -26,34 +21,14 @@ export function registerValidateMvu(program: Command, exitOnError: (fn: (...args
         throw new Error('项目未启用 MVU（tavern-cards-state.json 中 mvu 不为 true）');
       }
 
-      const schemaPath = resolve(projectDir, 'schema.ts');
-      const initvarPath = opts.initvar
+      const initvarOverride = opts.initvar
         ? (isAbsolute(opts.initvar) ? opts.initvar : resolve(cwd, opts.initvar))
-        : resolve(projectDir, '世界书/变量/initvar.yaml');
+        : undefined;
 
-      if (!existsSync(schemaPath)) {
-        throw new Error(`schema.ts 不存在: ${schemaPath}`);
+      const result = await validateMvuInitvar(projectDir, state.entryManifest, initvarOverride);
+      if (result === null) {
+        throw new Error(`schema.ts 不存在: ${resolve(projectDir, 'schema.ts')}`);
       }
-      if (!existsSync(initvarPath)) {
-        throw new Error(`initvar 文件不存在: ${initvarPath}`);
-      }
-
-      const jiti = createJiti(import.meta.url, { interopDefault: true });
-
-      const globalZ = globalThis as Record<string, unknown>;
-      globalZ.z = z;
-      globalZ._ = _;
-
-      const { Schema } = await jiti.import(schemaPath) as { Schema: z.ZodType };
-
-      if (!Schema) {
-        throw new Error('schema.ts 未导出 Schema');
-      }
-
-      const initvarData = yaml.parse(readFileText(initvarPath));
-
-      detailedParse(Schema, initvarData);
-
-      console.log(`validate-mvu: ${initvarPath} 校验通过`);
+      console.log(`validate-mvu: ${result.initvarPath} 校验通过`);
     }));
 }

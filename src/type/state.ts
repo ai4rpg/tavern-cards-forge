@@ -188,12 +188,21 @@ export const TavernCardsState = z.object({
   create_date: z.string().default('').describe('创建日期'),
   extensions: Extensions.optional().describe('扩展字段'),
   regex_scripts: z.record(z.string(), RegexScript).optional().describe('正则脚本映射, key 为脚本名称'),
+  initvar_overrides: z.record(z.string(), z.string()).optional()
+    .describe('开场白的 initvar_override 映射: key=开场白路径, value=override YAML 路径; 非MVU项目或无override时缺省'),
 }).superRefine((data, ctx) => {
   if (data.form === 'worldbook' && data.mvu) {
     ctx.addIssue({
       code: 'custom',
       path: ['mvu'],
       message: 'worldbook 时 mvu 必须为 false',
+    });
+  }
+  if (!data.mvu && data.initvar_overrides !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['initvar_overrides'],
+      message: 'mvu 为 false 时 initvar_overrides 必须缺省',
     });
   }
 });

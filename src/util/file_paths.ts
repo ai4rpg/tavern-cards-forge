@@ -9,6 +9,7 @@ const FILE_PATH_PATTERNS = [
   /^\/extensions\/tavern_helper\/scripts\/[^/]+\/script_file$/,
   /^\/avatar$/,
   /^\/first_messages\/\d+$/,
+  /^\/initvar_overrides\/[^/]+$/,
 ];
 
 export function isFilePathField(pointer: string): boolean {
@@ -120,6 +121,14 @@ export function validateAllFilePaths(
   for (const relPath of state.first_messages) {
     const absPath = resolve(projectDir, relPath);
     results.push({ path: relPath, exists: existsSync(absPath) });
+  }
+
+  // initvar_overrides paths
+  if (state.initvar_overrides) {
+    for (const overridePath of Object.values(state.initvar_overrides)) {
+      const absPath = resolve(projectDir, overridePath);
+      results.push({ path: overridePath, exists: existsSync(absPath) });
+    }
   }
   
   return results;

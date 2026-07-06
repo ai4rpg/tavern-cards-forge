@@ -76,17 +76,27 @@ tavern-cards-forge pack <project> [选项]
    - `extensions.tavern_helper.scripts.{name}.script_file`
    - `avatar`
    - `first_messages[]`
+   - `initvar_overrides` 中所有值
 
    若有缺失文件，列出清单并退出
 3. **编码检测**：读取每个内容文件时自动检测编码，非 UTF-8 文件报错退出（详见 [机制原理](Mechanisms.md#编码检测)）
-4. **MVU 验证**：若 `state.mvu === true`，验证项目中确实存在 MVU 特征（启用的 `tavern_helper.scripts` 中引用了 `MagicalAstrogy/MagVarUpdate` + `entryManifest` 中存在 `[InitVar]` 条目），不满足则报错退出（详见 [机制原理](Mechanisms.md#mvu-自动检测)）
-5. 解析所有条目，加载 `path` 或 `contents` 引用的内容文件；同时加载 `replace_file` / `script_file` 引用的文件内容
-6. 将 EntryManifestLeaf 转换为 SillyTavern 原始格式
-7. 根据 `form` 字段和 `avatar` 字段选择输出格式：
+4. **MVU 特征检测**：若 `state.mvu === true`，验证项目中存在 MVU 特征（详见 [机制原理](Mechanisms.md#mvu-检测)）
+5. **MVU 校验**（`state.mvu === true` 时依次执行）：
+   - **[InitVar] 条目禁用校验**：所有以 `[InitVar]` 开头的条目必须显式设置 `enabled: false`
+   - **schema.ts 预检**（项目根目录有 `schema.ts` 时）：`schema.ts` 不得包含任何 `import` 语句——`z`（Zod v4）与 `_`（lodash）已由 MVU 运行时作为全局注入，且 forge 不会打包额外 npm 包。命中即报错退出
+   - **Zod 脚本内容校验**（`schema.ts` 存在与否均执行）：
+     - 禁止：`import ... from 'zod'`、`from 'lodash'`、其他裸模块 / 相对 / 绝对路径 import，以及 `export type`（详见 [机制原理](Mechanisms.md#pack-时-mvu-校验)）
+     - `schema.ts` 存在时校验同步生成后的产物，不存在时校验磁盘原样 `脚本/{name}.txt`
+     - 不通过则报错退出
+   - **initvar 一致性校验**（项目根目录有 `schema.ts` 时）：校验 `[InitVar]` 条目 YAML 及 `initvar_overrides` 中所有文件是否匹配 `schema.ts` 定义的 Zod Schema
+6. 解析所有条目，加载 `path` 或 `contents` 引用的内容文件；同时加载 `replace_file` / `script_file` 引用的文件内容。**tavern_helper.scripts** 中启用的 MVU Zod 脚本（项目根目录有 `schema.ts` 时）自动从 `schema.ts` 同步生成内容
+7. **initvar_override 嵌入**：若 `state.initvar_overrides` 存在，将对应开场白的 `<UpdateVariable><initvar>` 块更新为 override YAML 内容
+8. 将 EntryManifestLeaf 转换为 SillyTavern 原始格式
+9. 根据 `form` 字段和 `avatar` 字段选择输出格式：
    - `form=worldbook` → 输出 JSON（扁平格式独立世界书）
    - `form=charactercard` 且 `avatar` 非空 → 输出 PNG（嵌入角色卡元数据 + 标准格式世界书）
    - `form=charactercard` 且 `avatar` 为空 → 输出 JSON（标准格式角色卡）
-8. 输出路径优先级：`--output` > 项目 `artifact` > state 同目录下 `{name}.json` / `{name}.png`
+10. 输出路径优先级：`--output` > 项目 `artifact` > state 同目录下 `{name}.json` / `{name}.png`
 
 **示例：**
 
@@ -128,12 +138,12 @@ tavern-cards-forge unpack <project> [选项]
    - PNG 文件 → 角色卡格式
    - JSON 文件 → 检测扁平格式或 SillyTavern 标准格式
 3. 提取所有条目，转换为扁平的 EntryManifestLeaf 结构
-4. **MVU 自动检测**：满足条件时自动设置 `mvu: true`（详见 [机制原理](Mechanisms.md#mvu-自动检测)）
+4. **MVU 自动检测**：满足条件时自动设置 `mvu: true`（详见 [机制原理](Mechanisms.md#mvu-检测)）
 5. 每个条目的 content 处理：
    - 剩余内容若解析为 YAML 对象，保存为 `世界书/{name}.yaml`，否则保存为 `世界书/{name}.txt`
 6. `regex_scripts` 中每个脚本的 `replaceString` 写入 `正则/{name}.txt`（如果非空），并设置 `replace_file` 字段
-7. `tavern_helper.scripts` 中每个脚本的 `content` 写入 `脚本/{name}.txt`（如果非空），并设置 `script_file` 字段
-8. `first_messages` 写入 `开场白/0.txt`, `1.txt`, ...（[0] 为 first_mes，[1:] 为 alternate_greetings）
+7. `tavern_helper.scripts` 中每个脚本的 `content` 写入 `脚本/{name}.txt`（如果非空），并设置 `script_file` 字段。若存在启用的 MVU Zod 脚本，取其第一个提取生成 `schema.ts`（详见 [机制原理](Mechanisms.md#zod-脚本同步)）
+8. `first_messages` 写入 `开场白/0.txt`, `1.txt`, ...（[0] 为 first_mes，[1:] 为 alternate_greetings）。若 `mvu === true`，检测并提取开场白中的 `<UpdateVariable><initvar>` 块为独立 YAML 文件，同时填充 `initvar_overrides` 字段（详见 [机制原理](Mechanisms.md#initvar_override-嵌入与提取)）
 9. 生成 `tavern-cards-state.json`，根据输入文件类型设置 `form` 字段
 10. 输出目录优先级：`--output` > `state_file` 所在目录 > 当前目录下以文件名命名的目录
 
@@ -227,16 +237,17 @@ tavern-cards-forge validate-mvu <project> [选项]
 
 - `tavern-cards-state.json` 中 `mvu: true`
 - 项目根目录存在 `schema.ts`，导出 Zod `Schema`
-- 待校验的 initvar YAML 文件已编写（未提供 `--initvar` 时默认 `./cards/MyCharacter/世界书/变量/initvar.yaml`）
+- 待校验的 initvar YAML 文件已编写（未提供 `--initvar` 时从 `entryManifest` 中 `[InitVar]` 条目的 `path` 字段解析默认路径）
 
 **行为：**
 
 1. 读取 state.json，检查 `mvu === true`
 2. 用 jiti 加载 `schema.ts`，注入全局 `z`（Zod v4）和 `_`（lodash）
-   - 单文件产物已内置 jiti、Zod 和 lodash；项目自己的 `schema.ts` 应使用全局 `z` / `_`，不要依赖本地 `node_modules` 中的 `import { z } from 'zod'`
-3. 解析指定的 initvar YAML 文件
-4. 用 Schema 校验 YAML 数据
-5. 校验通过打印成功信息，失败打印详细错误路径和原因
+   - 单文件产物已内置 jiti、Zod 和 lodash；`schema.ts` 直接使用全局 `z` / `_`，**禁止任何 `import` 语句**（含 `import { z } from 'zod'`、`import _ from 'lodash'`、CDN URL import、相对路径 import）——详见下一步预检
+3. 读取 `schema.ts` 后先预检：若含任何 `import` 语句，立即报错退出（与 `pack` 中的 schema.ts 预检一致——`z` / `_` 已是全局，且 forge 不会打包额外 npm 包）
+4. 解析指定的 initvar YAML 文件
+5. 用 Schema 校验 YAML 数据
+6. 校验通过打印成功信息，失败打印详细错误路径和原因
 
 **示例：**
 

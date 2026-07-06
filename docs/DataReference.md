@@ -100,6 +100,9 @@
   "avatar": "avatar.png",
   "description": "角色描述",
   "first_messages": ["开场白/0.txt", "开场白/1.txt"],
+  "initvar_overrides": {                   // 可选，MVU 项目不同开场白的独立 initvar
+    "开场白/1.txt": "开场白/initvar/1.yaml"  // key=开场白路径，value=override YAML 路径
+  },
   "creator": "Author",
   "creator_notes": "",
   "version": "1.0",
@@ -281,6 +284,7 @@ TavernHelper 扩展配置。
 | `RegexScript` | `replaceString` ↔ `replace_file` | 二选一，不能同时存在或都为空 |
 | `TavernHelperScript` | `content` ↔ `script_file` | 二选一，不能同时存在或都为空 |
 | `TavernCardsState` | `form` + `mvu` | `form=worldbook` 时 `mvu` 必须为 `false` |
+| `TavernCardsState` | `mvu` + `initvar_overrides` | `mvu=false` 时 `initvar_overrides` 必须缺省 |
 
 **运行时编码检测**：
 

@@ -11,6 +11,7 @@ import type { TavernCardsState, TavernHelper, EntryManifestLeaf } from '../type/
 import { resolveProject, ProjectNotFoundError, requireConfiguredProject } from '../cli/settings.js';
 import { stripCharaChunks } from '../pack/png_encode.js';
 import { detectMvu } from '../util/detect_mvu.js';
+import { isMvuZodScript, extractSchemaTsFromScript, extractInitvarOverrideFromGreeting } from '../util/mvu_schema.js';
 
 const DIR_ENTRIES = '世界书';
 const DIR_REGEX = '正则';
@@ -351,6 +352,8 @@ export async function runUnpack(
     const scriptsDir = join(outputDir, DIR_SCRIPTS);
     mkdirSync(scriptsDir, { recursive: true });
 
+    const enabledZodScripts: Array<{ name: string; content: string }> = [];
+
     for (const [scriptName, script] of Object.entries(tavernHelper.scripts)) {
       const content = script.content;
       if (!content) continue;
@@ -361,7 +364,30 @@ export async function runUnpack(
 
       writeFileRecursive(absPath, content);
       script.script_file = relPath;
+
+      // 收集启用的 Zod schema 脚本
+      if (isMvuZodScript(content) && script.enabled) {
+        enabledZodScripts.push({ name: scriptName, content });
+      }
+
       delete script.content;
+    }
+
+    // 从启用的 Zod 脚本生成 schema.ts
+    if (enabledZodScripts.length > 0) {
+      if (enabledZodScripts.length > 1) {
+        console.warn(`⚠ Found ${enabledZodScripts.length} enabled Zod scripts, will extract the first one "${enabledZodScripts[0].name}". Multiple Zod scripts may cause runtime behavior to be non-deterministic; consider disabling the extras.`);
+      }
+      const { name: zodName, content: zodContent } = enabledZodScripts[0];
+      const schemaTs = extractSchemaTsFromScript(zodContent);
+      if (schemaTs !== null) {
+        const schemaPath = join(outputDir, 'schema.ts');
+        writeFileRecursive(schemaPath, schemaTs);
+        console.log(`  Generated schema.ts (extracted from Zod script "${zodName}")`);
+      } else {
+        console.warn(`⚠ Zod script "${zodName}" is a compiled/minified artifact; cannot auto-extract schema.ts. ` +
+          `Please manually write schema.ts based on the Zod schema definition, or ask AI to assist.`);
+      }
     }
   }
 
@@ -371,15 +397,43 @@ export async function runUnpack(
     mkdirSync(greetingsDir, { recursive: true });
 
     const paths: string[] = [];
+    const initvarOverrides: Record<string, string> = {};
+
     for (let gi = 0; gi < state.first_messages.length; gi++) {
+      let content = state.first_messages[gi];
+
+      // MVU: 提取 <UpdateVariable><initvar> 块
+      // 对所有开场白检测（包括 gi === 0），只要有块就提取
+      if (state.mvu) {
+        const extracted = extractInitvarOverrideFromGreeting(content);
+        if (extracted) {
+          const overrideFilename = `initvar/${gi}.yaml`;
+          const overrideRelPath = join(DIR_GREETINGS, overrideFilename);
+          const overrideAbsPath = join(outputDir, overrideRelPath);
+
+          mkdirSync(dirname(overrideAbsPath), { recursive: true });
+          writeFileRecursive(overrideAbsPath, extracted.initvarYaml);
+
+          const greetingRelPath = join(DIR_GREETINGS, `${gi}.txt`);
+          initvarOverrides[greetingRelPath] = overrideRelPath;
+
+          content = extracted.cleanedContent;
+          console.log(`  Extracted initvar_override → ${overrideRelPath}`);
+        }
+      }
+
       const filename = `${gi}.txt`;
       const relPath = join(DIR_GREETINGS, filename);
       const absPath = join(outputDir, relPath);
 
-      writeFileRecursive(absPath, state.first_messages[gi]);
+      writeFileRecursive(absPath, content);
       paths.push(relPath);
     }
+
     state.first_messages = paths;
+    if (Object.keys(initvarOverrides).length > 0) {
+      state.initvar_overrides = initvarOverrides;
+    }
   }
 
   writeJson(resolve(outputDir, 'tavern-cards-state.json'), sortEntriesForSerialization(state));

@@ -62,12 +62,12 @@ export const EntryManifestLeaf = z.object({
   recursion: z.object({
     prevent_incoming: z.boolean().optional().describe('禁止其他条目递归激活本条目'),
     prevent_outgoing: z.boolean().optional().describe('禁止本条目递归激活其他条目'),
-    delay_until: z.number().min(1).nullable().optional().describe('延迟到第 n 级递归检查时才能激活本条目'),
+    delay_until: z.number().min(1).optional().describe('延迟到第 n 级递归检查时才能激活本条目'),
   }).partial().optional().describe('递归设置'),
   effect: z.object({
-    sticky: z.number().min(1).nullable().optional().describe('黏性: 激活后持续 n 条消息'),
-    cooldown: z.number().min(1).nullable().optional().describe('冷却: 激活后 n 条消息内不能再次激活'),
-    delay: z.number().min(1).nullable().optional().describe('延迟: 聊天至少有 n 楼消息时才能激活'),
+    sticky: z.number().min(1).optional().describe('黏性: 激活后持续 n 条消息'),
+    cooldown: z.number().min(1).optional().describe('冷却: 激活后 n 条消息内不能再次激活'),
+    delay: z.number().min(1).optional().describe('延迟: 聊天至少有 n 楼消息时才能激活'),
   }).partial().optional().describe('效果（黏性/冷却/延迟）'),
   group: z.object({
     labels: z.array(z.coerce.string()).min(1).describe('组标签'),
@@ -122,8 +122,8 @@ export const RegexScript = z.object({
   promptOnly: z.boolean().optional(),
   runOnEdit: z.boolean().optional(),
   substituteRegex: z.number().optional(),
-  minDepth: z.number().nullable().optional(),
-  maxDepth: z.number().nullable().optional(),
+  minDepth: z.number().optional(),
+  maxDepth: z.number().optional(),
 }).partial({ replaceString: true, replace_file: true })
   .superRefine((data, ctx) => mutuallyExclusive(['replaceString', 'replace_file'])(data, ctx));
 

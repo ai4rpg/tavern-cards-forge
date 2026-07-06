@@ -22,6 +22,8 @@ function convertRegexScriptsToState(raw: any[] | undefined): Record<string, any>
   const result: Record<string, any> = {};
   for (const s of raw) {
     const { scriptName, ...rest } = s;
+    if (rest.minDepth === null) delete rest.minDepth;
+    if (rest.maxDepth === null) delete rest.maxDepth;
     const name = scriptName ?? s.id ?? `regex_${raw.indexOf(s)}`;
     result[name] = rest;
   }

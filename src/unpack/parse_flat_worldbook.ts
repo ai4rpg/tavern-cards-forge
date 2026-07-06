@@ -1,11 +1,6 @@
 import type { EntryManifestLeaf, TavernCardsState } from '../type/state.js';
 import type { FlatWorldbookEntry } from '../type/entry-flat.js';
-
-const zeroToUndefined = (val: number | null | undefined): number | undefined =>
-  val === 0 || val === null ? undefined : val;
-
-const zeroToUndefinedPreserveNull = (val: number | null | undefined): number | null | undefined =>
-  val === 0 ? undefined : val;
+import { zeroToUndefined } from '../util/zero_to_undefined.js';
 
 const POSITION_REVERSE: Record<number, 'before_character_definition' | 'after_character_definition' | 'before_author_note' | 'after_author_note' | 'at_depth' | 'before_example_messages' | 'after_example_messages'> = {
   0: 'before_character_definition',
@@ -42,13 +37,13 @@ export function parseFlatEntry(flat: FlatWorldbookEntry, index: number): EntryMa
   const hasSecondary = flat.keysecondary && flat.keysecondary.length > 0;
 
   const recursion: NonNullable<EntryManifestLeaf['recursion']> = {};
-  if (flat.excludeRecursion) recursion.prevent_incoming = true;
-  if (flat.preventRecursion) recursion.prevent_outgoing = true;
+  if (flat.excludeRecursion !== undefined) recursion.prevent_incoming = flat.excludeRecursion;
+  if (flat.preventRecursion !== undefined) recursion.prevent_outgoing = flat.preventRecursion;
   if (flat.delayUntilRecursion != null && typeof flat.delayUntilRecursion === 'number') {
-    recursion.delay_until = zeroToUndefinedPreserveNull(flat.delayUntilRecursion);
+    recursion.delay_until = zeroToUndefined(flat.delayUntilRecursion);
   }
   // Omit default recursion (prevent_incoming + prevent_outgoing both true, no delay_until)
-  const isDefaultRecursion = recursion.prevent_incoming && recursion.prevent_outgoing && !recursion.delay_until;
+  const isDefaultRecursion = recursion.prevent_incoming === true && recursion.prevent_outgoing === true && !recursion.delay_until;
   if (isDefaultRecursion) {
     delete recursion.prevent_incoming;
     delete recursion.prevent_outgoing;

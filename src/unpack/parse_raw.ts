@@ -1,5 +1,6 @@
 import type { SillyTavernEntry } from '../type/sillytavern.js';
 import type { EntryManifestLeaf, TavernCardsState } from '../type/state.js';
+import { zeroToUndefined } from '../util/zero_to_undefined.js';
 
 const POSITION_REVERSE: Record<number, 'before_character_definition' | 'after_character_definition' | 'before_author_note' | 'after_author_note' | 'at_depth' | 'before_example_messages' | 'after_example_messages'> = {
   0: 'before_character_definition',
@@ -37,11 +38,14 @@ export function parseRawEntry(raw: SillyTavernEntry, index: number): EntryManife
   const hasSecondary = raw.secondary_keys && raw.secondary_keys.length > 0;
 
   const recursion: NonNullable<EntryManifestLeaf['recursion']> = {};
-  if (ext.exclude_recursion) recursion.prevent_incoming = true;
-  if (ext.prevent_recursion) recursion.prevent_outgoing = true;
-  if (typeof ext.delay_until_recursion === 'number') recursion.delay_until = ext.delay_until_recursion;
+  if (ext.exclude_recursion !== undefined) recursion.prevent_incoming = ext.exclude_recursion;
+  if (ext.prevent_recursion !== undefined) recursion.prevent_outgoing = ext.prevent_recursion;
+  if (typeof ext.delay_until_recursion === 'number') {
+    const delay = zeroToUndefined(ext.delay_until_recursion);
+    if (delay !== undefined) recursion.delay_until = delay;
+  }
   // Omit default recursion (prevent_incoming + prevent_outgoing both true, no delay_until)
-  const isDefaultRecursion = recursion.prevent_incoming && recursion.prevent_outgoing && !recursion.delay_until;
+  const isDefaultRecursion = recursion.prevent_incoming === true && recursion.prevent_outgoing === true && !recursion.delay_until;
   if (isDefaultRecursion) {
     delete recursion.prevent_incoming;
     delete recursion.prevent_outgoing;

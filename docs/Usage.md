@@ -52,7 +52,7 @@ tavern-cards-forge --help
 所有命令的第一个参数 `<project>` 通常填写 `.cardrc.json` 中 `projects` 的 key。若不想注册项目，也可以使用占位符，并通过路径选项直接指定输入/输出：
 
 - **只需要 state 路径的命令**：configure、init、validate-mvu、query、patch — 提供 `--state` 后，`<project>` 可写成任意占位符。
-- **需要同时指定输入和输出的命令**：pack、unpack — pack 需要 `--state` + `--output`，unpack 需要 `--file` + `--output`；此时 `<project>` 也只作为占位符。
+- **需要同时指定输入和输出的命令**：pack — 需要 `--state` + `--output`；unpack — 需要 `--file`，且必须提供 `--state`（merge 模式，`--output` 可从 `--state` 推导）或 `--fresh`（全新解包，同时需 `--output`）之一；此时 `<project>` 也只作为占位符。
 
 ### pack
 
@@ -77,19 +77,17 @@ tavern-cards-forge pack <project> [选项]
    - `avatar`
    - `first_messages[]`
    - `initvar_overrides` 中所有值
+   - `zod.schemaPath`
 
    若有缺失文件，列出清单并退出
 3. **编码检测**：读取每个内容文件时自动检测编码，非 UTF-8 文件报错退出（详见 [机制原理](Mechanisms.md#编码检测)）
 4. **MVU 特征检测**：若 `state.mvu === true`，验证项目中存在 MVU 特征（详见 [机制原理](Mechanisms.md#mvu-检测)）
 5. **MVU 校验**（`state.mvu === true` 时依次执行）：
    - **[InitVar] 条目禁用校验**：所有以 `[InitVar]` 开头的条目必须显式设置 `enabled: false`
-   - **schema.ts 预检**（项目根目录有 `schema.ts` 时）：`schema.ts` 不得包含任何 `import` 语句——`z`（Zod v4）与 `_`（lodash）已由 MVU 运行时作为全局注入，且 forge 不会打包额外 npm 包。命中即报错退出
-   - **Zod 脚本内容校验**（`schema.ts` 存在与否均执行）：
-     - 禁止：`import ... from 'zod'`、`from 'lodash'`、其他裸模块 / 相对 / 绝对路径 import，以及 `export type`（详见 [机制原理](Mechanisms.md#pack-时-mvu-校验)）
-     - `schema.ts` 存在时校验同步生成后的产物，不存在时校验磁盘原样 `脚本/{name}.txt`
-     - 不通过则报错退出
-   - **initvar 一致性校验**（项目根目录有 `schema.ts` 时）：校验 `[InitVar]` 条目 YAML 及 `initvar_overrides` 中所有文件是否匹配 `schema.ts` 定义的 Zod Schema
-6. 解析所有条目，加载 `path` 或 `contents` 引用的内容文件；同时加载 `replace_file` / `script_file` 引用的文件内容。**tavern_helper.scripts** 中启用的 MVU Zod 脚本（项目根目录有 `schema.ts` 时）自动从 `schema.ts` 同步生成内容
+   - **Zod 脚本内容校验**（`state.zod` 存在时）：从 `state.zod.schemaPath` 读取 `schema.ts` 并重建 Zod 脚本内容，校验是否含 `export type` 等运行时失效模式（详见 [机制原理](Mechanisms.md#pack-时-mvu-校验)）
+   - **initvar 一致性校验**（`state.zod` 存在且 `schema.ts` 文件存在时）：加载 `schema.ts` 导出的 Zod Schema 实例（单次加载，复用校验所有 initvar 文件），校验 `[InitVar]` 条目 YAML 及 `initvar_overrides` 中所有文件是否匹配
+   - `state.mvu === true` 但 `state.zod` 缺失时输出警告，跳过 Zod 相关校验
+6. 解析所有条目，加载 `path` 或 `contents` 引用的内容文件；同时加载 `replace_file` / `script_file` 引用的文件内容。**tavern_helper.scripts** 中 Zod 脚本由 `state.zod` 从 `schema.ts` 重建（详见 [机制原理](Mechanisms.md#zod-脚本同步)）；普通脚本仅解析 `script_file` → `content`
 7. **initvar_override 嵌入**：若 `state.initvar_overrides` 存在，将对应开场白的 `<UpdateVariable><initvar>` 块更新为 override YAML 内容
 8. 将 EntryManifestLeaf 转换为 SillyTavern 原始格式
 9. 根据 `form` 字段和 `avatar` 字段选择输出格式：
@@ -126,10 +124,12 @@ tavern-cards-forge unpack <project> [选项]
 
 | 选项 | 说明 |
 |------|------|
-| `--file <path>` | 直接指定输入 PNG/JSON 路径；与 `--output` 配合可跳过项目查找 |
-| `--output <dir>` | 覆盖输出目录；未注册项目时与 `--file` 配合必需 |
+| `--file <path>` | 直接指定输入 PNG/JSON 路径；未注册项目时必需 |
+| `--output <dir>` | 覆盖输出目录；merge 模式下可从 `--state` 推导；`--fresh` 模式下未注册项目时必需 |
+| `--state <path>` | 指定已有 state.json 路径用于合并（merge 模式）；与 `--fresh` 互斥；`--output` 未指定时默认取其所在目录 |
 | `--raw` | 输出原始 SillyTavern JSON（不转换） |
 | `--split` | 拆分长内容为独立文件 |
+| `--fresh` | 跳过与已有 state 合并，直接覆盖输出（全新解包）；与 `--state` 互斥 |
 
 **行为：**
 
@@ -139,13 +139,18 @@ tavern-cards-forge unpack <project> [选项]
    - JSON 文件 → 检测扁平格式或 SillyTavern 标准格式
 3. 提取所有条目，转换为扁平的 EntryManifestLeaf 结构
 4. **MVU 自动检测**：满足条件时自动设置 `mvu: true`（详见 [机制原理](Mechanisms.md#mvu-检测)）
-5. 每个条目的 content 处理：
-   - 剩余内容若解析为 YAML 对象，保存为 `世界书/{name}.yaml`，否则保存为 `世界书/{name}.txt`
-6. `regex_scripts` 中每个脚本的 `replaceString` 写入 `正则/{name}.txt`（如果非空），并设置 `replace_file` 字段
-7. `tavern_helper.scripts` 中每个脚本的 `content` 写入 `脚本/{name}.txt`（如果非空），并设置 `script_file` 字段。若存在启用的 MVU Zod 脚本，取其第一个提取生成 `schema.ts`（详见 [机制原理](Mechanisms.md#zod-脚本同步)）
-8. `first_messages` 写入 `开场白/0.txt`, `1.txt`, ...（[0] 为 first_mes，[1:] 为 alternate_greetings）。若 `mvu === true`，检测并提取开场白中的 `<UpdateVariable><initvar>` 块为独立 YAML 文件，同时填充 `initvar_overrides` 字段（详见 [机制原理](Mechanisms.md#initvar_override-嵌入与提取)）
-9. 生成 `tavern-cards-state.json`，根据输入文件类型设置 `form` 字段
-10. 输出目录优先级：`--output` > `state_file` 所在目录 > 当前目录下以文件名命名的目录
+5. **Zod 脚本检测与提取**：从 `tavern_helper.scripts` 中检测 MVU Zod 脚本，提取元数据写入 `state.zod`，并从 scripts 中移除该 Zod 脚本（不再写出为 `脚本/{name}.txt`）。若脚本为压缩/编译产物则仅记录警告（详见 [机制原理](Mechanisms.md#zod-脚本同步)）
+6. **merge 模式**（默认，即未指定 `--fresh` 时）：若 `--state` 指向的 state.json 或项目配置的 state 文件存在，将已有 state 的分类/路径等信息合并到新解包的 state 中。`--output` 未指定时从 `--state` 路径推导（取其所在目录）
+7. 每个条目的 content 处理：
+   - 按 uid/条目名匹配内容（merge 后位置索引可能错位，使用 uid 优先匹配）
+   - **fresh 模式**：内容解析为 YAML 对象时保存为 `世界书/{name}.yaml`；内容为 XML 标签包裹的 YAML（如 `@@if` + `<tag>`）时拆分为 `contents` 片段；其余保存为 `世界书/{name}.txt`。文件名经 `sanitizeFilename` 净化特殊字符
+   - **merge 模式**：保留旧 state 的目录结构和文件名主体，仅根据新内容格式调整后缀（`.yaml` ↔ `.txt`）。旧 `contents` 片段路径同样保留。新增条目走 fresh 模式的完整自动判定
+   - 存储方式变更时（如 `.txt` → `.yaml`、`path` ↔ `contents`）输出警告提示手动清理旧文件
+8. `regex_scripts` 中每个脚本的 `replaceString` 写入 `正则/{name}.txt`（如果非空），并设置 `replace_file` 字段
+9. `tavern_helper.scripts` 中每个脚本的 `content` 写入 `脚本/{name}.txt`（如果非空），并设置 `script_file` 字段。Zod 脚本已在步骤 5 中提取移除，此处仅处理普通脚本
+10. `first_messages` 写入 `开场白/0.txt`, `1.txt`, ...（[0] 为 first_mes，[1:] 为 alternate_greetings）。若 `mvu === true`，检测并提取开场白中的 `<UpdateVariable><initvar>` 块为独立 YAML 文件，同时填充 `initvar_overrides` 字段（详见 [机制原理](Mechanisms.md#initvar_override-嵌入与提取)）
+11. 生成 `tavern-cards-state.json`，根据输入文件类型设置 `form` 字段
+12. 输出目录优先级：`--output` > `--state` 所在目录（merge 模式） > `state_file` 所在目录 > 当前目录下以文件名命名的目录
 
 **示例：**
 
@@ -153,13 +158,19 @@ tavern-cards-forge unpack <project> [选项]
 # 通过注册项目解包
 tavern-cards-forge unpack <project>
 
-# 未注册项目时，使用占位符并同时提供输入和输出
+# 未注册项目时，merge 模式（--output 可从 --state 推导）
 tavern-cards-forge unpack temp \
   --file ./MyCharacter.png \
-  --output ./MyCharacter-project
+  --state ./MyCharacter-project/tavern-cards-state.json
 
-# 仅提供 --file 而没有 --output 会失败
-tavern-cards-forge unpack temp --file ./MyCharacter.png
+# 未注册项目时，全新解包（需同时指定 --file 和 --output）
+tavern-cards-forge unpack temp \
+  --file ./MyCharacter.png \
+  --output ./MyCharacter-project \
+  --fresh
+
+# --fresh 和 --state 互斥
+tavern-cards-forge unpack temp --file ./MyCharacter.png --fresh --state ./state.json  # 报错
 
 # 输出原始 JSON
 tavern-cards-forge unpack <project> --raw
@@ -236,18 +247,20 @@ tavern-cards-forge validate-mvu <project> [选项]
 **前置条件：**
 
 - `tavern-cards-state.json` 中 `mvu: true`
-- 项目根目录存在 `schema.ts`，导出 Zod `Schema`
+- `state.zod` 存在（含 `schemaPath` 指向 `schema.ts`），导出 Zod `Schema`
 - 待校验的 initvar YAML 文件已编写（未提供 `--initvar` 时从 `entryManifest` 中 `[InitVar]` 条目的 `path` 字段解析默认路径）
 
 **行为：**
 
 1. 读取 state.json，检查 `mvu === true`
-2. 用 jiti 加载 `schema.ts`，注入全局 `z`（Zod v4）和 `_`（lodash）
+2. 检查 `state.zod` 存在；缺失时报错提示运行 `forge unpack` 自动填充
+3. 根据 `state.zod.schemaPath` 定位 `schema.ts`
+4. 用 jiti 加载 `schema.ts`，注入全局 `z`（Zod v4）和 `_`（lodash）
    - 单文件产物已内置 jiti、Zod 和 lodash；`schema.ts` 直接使用全局 `z` / `_`，**禁止任何 `import` 语句**（含 `import { z } from 'zod'`、`import _ from 'lodash'`、CDN URL import、相对路径 import）——详见下一步预检
-3. 读取 `schema.ts` 后先预检：若含任何 `import` 语句，立即报错退出（与 `pack` 中的 schema.ts 预检一致——`z` / `_` 已是全局，且 forge 不会打包额外 npm 包）
-4. 解析指定的 initvar YAML 文件
-5. 用 Schema 校验 YAML 数据
-6. 校验通过打印成功信息，失败打印详细错误路径和原因
+5. 读取 `schema.ts` 后先预检：若含任何 `import` 语句，立即报错退出（与 `pack` 中的 schema.ts 预检一致——`z` / `_` 已是全局，且 forge 不会打包额外 npm 包）
+6. 解析指定的 initvar YAML 文件
+7. 用 Schema 校验 YAML 数据
+8. 校验通过打印成功信息，失败打印详细错误路径和原因
 
 **示例：**
 
@@ -390,6 +403,7 @@ mv 正则/状态栏.txt 正则/状态栏.html
 | `/entryManifest/{type}/{name}/contents/{i}/file` | 内容片段文件 |
 | `/regex_scripts/{name}/replace_file` | 正则替换文件 |
 | `/extensions/tavern_helper/scripts/{name}/script_file` | 脚本文件 |
+| `/zod/schemaPath` | Zod schema 文件 |
 | `/avatar` | 头像 PNG |
 | `/first_messages/{i}` | 开场白文件 |
 
@@ -499,7 +513,8 @@ tavern-cards-forge pack <project>
 ```bash
 # 直接指定文件路径，temp 仅为占位符
 tavern-cards-forge pack temp --state ./some-state.json --output ./output.png
-tavern-cards-forge unpack temp --file ./input.png --output ./output-dir
+tavern-cards-forge unpack temp --file ./input.png --state ./existing-state.json  # merge 模式
+tavern-cards-forge unpack temp --file ./input.png --output ./output-dir --fresh  # 全新解包
 ```
 
 ### 独立世界书导入导出

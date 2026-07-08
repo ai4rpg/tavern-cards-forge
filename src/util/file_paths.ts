@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { TavernCardsState, EntryManifestLeaf, RegexScript, TavernHelperScript } from '../type/state.js';
+import type { TavernCardsState, EntryManifestLeaf, RegexScript, TavernHelperScript, ZodDescriptor } from '../type/state.js';
 
 const FILE_PATH_PATTERNS = [
   /^\/entryManifest\/[^/]+\/[^/]+\/path$/,
@@ -10,6 +10,7 @@ const FILE_PATH_PATTERNS = [
   /^\/avatar$/,
   /^\/first_messages\/\d+$/,
   /^\/initvar_overrides\/[^/]+$/,
+  /^\/zod\/schemaPath$/,
 ];
 
 export function isFilePathField(pointer: string): boolean {
@@ -75,6 +76,10 @@ export function collectTavernHelperScriptFilePaths(script: TavernHelperScript): 
   return paths;
 }
 
+export function collectZodFilePaths(zod: ZodDescriptor): string[] {
+  return [zod.schemaPath];
+}
+
 export interface FilePathValidation {
   path: string;
   exists: boolean;
@@ -130,6 +135,14 @@ export function validateAllFilePaths(
       results.push({ path: overridePath, exists: existsSync(absPath) });
     }
   }
-  
+
+  // zod paths
+  if (state.zod) {
+    for (const relPath of collectZodFilePaths(state.zod)) {
+      const absPath = resolve(projectDir, relPath);
+      results.push({ path: relPath, exists: existsSync(absPath) });
+    }
+  }
+
   return results;
 }

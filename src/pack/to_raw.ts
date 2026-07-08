@@ -112,7 +112,7 @@ export function toSillyTavernEntry(
       match_creator_notes: false,
       triggers: [],
       ignore_budget: false,
-      ...(leaf.extra ? leaf.extra : {}),
+      // extra 字段已移除（v0.x 破坏性变更）；额外扩展请直接在 extensions 上添加
     },
   };
 }

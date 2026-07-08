@@ -76,7 +76,6 @@ export const EntryManifestLeaf = z.object({
     use_scoring: z.union([z.boolean(), z.literal('same_as_global')]).default('same_as_global')
       .transform(data => data === 'same_as_global' ? null : data).describe('使用评分'),
   }).optional().describe('组设置'),
-  extra: z.record(z.string(), z.any()).optional().describe('额外字段'),
 }).superRefine((data, ctx) => mutuallyExclusive(['path', 'contents'])(data, ctx));
 
 export const EntryManifest = z.record(EntryType, z.record(z.string(), EntryManifestLeaf))
@@ -150,6 +149,16 @@ export const TavernHelper = z.object({
   variables: z.record(z.string(), z.any()).optional(),
 });
 
+const ZodDescriptor = z.object({
+  scriptName: z.string().describe('脚本名, 即重建到 tavern_helper.scripts 时的 key'),
+  scriptId: z.string().describe('来自角色卡的脚本 id; pack 时原样回写以保持跨 pack 稳定'),
+  schemaPath: z.string().describe('schema.ts 相对项目根目录的路径'),
+  importUrl: z.string().describe('registerMvuSchema 的 CDN import URL'),
+  button: TavernHelperScript.shape.button.unwrap().optional(),
+  info: z.string().optional(),
+  data: z.record(z.string(), z.any()).optional(),
+});
+
 export const Extensions = z.looseObject({
   tavern_helper: TavernHelper.optional(),
   talkativeness: z.string().optional(),
@@ -190,6 +199,8 @@ export const TavernCardsState = z.object({
   regex_scripts: z.record(z.string(), RegexScript).optional().describe('正则脚本映射, key 为脚本名称'),
   initvar_overrides: z.record(z.string(), z.string()).optional()
     .describe('开场白的 initvar_override 映射: key=开场白路径, value=override YAML 路径; 非MVU项目或无override时缺省'),
+  zod: ZodDescriptor.optional()
+    .describe('MVU Zod 脚本元数据; 存在时隐含 mvu=true, pack 据此重建脚本内容'),
 }).superRefine((data, ctx) => {
   if (data.form === 'worldbook' && data.mvu) {
     ctx.addIssue({
@@ -203,6 +214,13 @@ export const TavernCardsState = z.object({
       code: 'custom',
       path: ['initvar_overrides'],
       message: 'mvu 为 false 时 initvar_overrides 必须缺省',
+    });
+  }
+  if (data.zod && !data.mvu) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['zod'],
+      message: 'state.zod 存在时 mvu 必须为 true',
     });
   }
 });
@@ -224,3 +242,4 @@ export type RegexScript = z.infer<typeof RegexScript>;
 export type TavernHelperScript = z.infer<typeof TavernHelperScript>;
 export type TavernHelper = z.infer<typeof TavernHelper>;
 export type Extensions = z.infer<typeof Extensions>;
+export type ZodDescriptor = z.infer<typeof ZodDescriptor>;

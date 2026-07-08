@@ -79,7 +79,7 @@
   "projectName": "MyCharacter",
   "worldbookName": "MyCharacter",
   "form": "charactercard",          // "charactercard" | "worldbook"
-  "mvu": false,                     // worldbook 时必须为 false (Zod 校验)；unpack 时自动检测
+  "mvu": false,                     // worldbook 时必须为 false (Zod 校验)；unpack 时自动检测；state.zod 存在时必须为 true
   "typeLists": {
     "before_char": ["EJS预处理", "世界观"],
     "after_char": ["角色", "NPC"],
@@ -102,6 +102,12 @@
   "first_messages": ["开场白/0.txt", "开场白/1.txt"],
   "initvar_overrides": {                   // 可选，MVU 项目不同开场白的独立 initvar
     "开场白/1.txt": "开场白/initvar/1.yaml"  // key=开场白路径，value=override YAML 路径
+  },
+  "zod": {                                 // 可选，MVU Zod 脚本元数据；存在时隐含 mvu=true
+    "scriptName": "Zod",
+    "scriptId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "schemaPath": "schema.ts",
+    "importUrl": "https://testingcf.jsdelivr.net/gh/StageDog/tavern_resource/dist/util/mvu_zod.js"
   },
   "creator": "Author",
   "creator_notes": "",
@@ -161,7 +167,6 @@
 | `recursion` | object? | 运行时 | 递归设置（空对象时省略） |
 | `effect` | object? | 运行时 | 效果（黏性/冷却/延迟，空对象时省略） |
 | `group` | object? | 运行时 | 组设置 |
-| `extra` | object? | 运行时 | 额外字段 |
 
 > **注意**：运行时字段由 `configure` 命令自动推导，编写 state.json 时通常只需填写规划字段。运行时字段仅在需要覆盖默认推导结果时手动设置。
 
@@ -273,6 +278,20 @@ TavernHelper 扩展配置。
 | `scripts` | Record\<string, TavernHelperScript\>? | 脚本列表（key 为脚本名称） |
 | `variables` | object? | 变量定义 |
 
+### ZodDescriptor 对象
+
+MVU Zod 脚本元数据，以 `zod` 字段存储在 `TavernCardsState` 顶层。存在时隐含 `mvu=true`，pack 据此重建脚本内容。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `scriptName` | string | 脚本名，即重建到 `tavern_helper.scripts` 时的 key |
+| `scriptId` | string | 来自角色卡的脚本 id（通常为 UUID）；pack 时原样回写以保持跨 pack 稳定 |
+| `schemaPath` | string | `schema.ts` 相对项目根目录的路径 |
+| `importUrl` | string | `registerMvuSchema` 的 CDN import URL |
+| `button` | object? | 按钮配置（与 ST 默认值 `{enabled:true, buttons:[]}` 相同时省略） |
+| `info` | string? | 脚本说明（与 ST 默认值 `""` 相同时省略） |
+| `data` | object? | 额外数据（与 ST 默认值 `{}` 相同时省略） |
+
 ### Schema 验证
 
 以下互斥字段和跨字段约束会在 Schema 层面验证：
@@ -285,6 +304,7 @@ TavernHelper 扩展配置。
 | `TavernHelperScript` | `content` ↔ `script_file` | 二选一，不能同时存在或都为空 |
 | `TavernCardsState` | `form` + `mvu` | `form=worldbook` 时 `mvu` 必须为 `false` |
 | `TavernCardsState` | `mvu` + `initvar_overrides` | `mvu=false` 时 `initvar_overrides` 必须缺省 |
+| `TavernCardsState` | `zod` + `mvu` | `state.zod` 存在时 `mvu` 必须为 `true` |
 
 **运行时编码检测**：
 
@@ -443,7 +463,6 @@ project-root/
         状态栏界面-实时修改.html
       脚本/
         MVU.txt
-        Zod.txt
       开场白/
         0.txt
 ```
@@ -471,6 +490,7 @@ project-root/
   "projectName": "MyCharacter",
   "worldbookName": "MyCharacter",
   "form": "charactercard",
+  "mvu": false,
   "avatar": "avatar.png",
   "first_messages": ["开场白/0.txt"],
   "extensions": {
@@ -486,13 +506,44 @@ project-root/
 }
 ```
 
-**角色卡项目 - JSON 格式** (`form = "charactercard"`, `avatar` 为空): (`form = "charactercard"`, `avatar` 为空):
+**MVU 角色卡项目** (`form = "charactercard"`, `mvu = true`):
 
 ```json
 {
   "projectName": "MyCharacter",
   "worldbookName": "MyCharacter",
   "form": "charactercard",
+  "mvu": true,
+  "avatar": "avatar.png",
+  "first_messages": ["开场白/0.txt"],
+  "initvar_overrides": { "开场白/1.txt": "开场白/initvar/1.yaml" },
+  "zod": {
+    "scriptName": "Zod",
+    "scriptId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "schemaPath": "schema.ts",
+    "importUrl": "https://testingcf.jsdelivr.net/gh/StageDog/tavern_resource/dist/util/mvu_zod.js"
+  },
+  "extensions": {
+    "tavern_helper": {
+      "scripts": {
+        "MVU": { "type": "script", "script_file": "脚本/MVU.txt", "enabled": true, "id": "..." }
+      }
+    }
+  },
+  "regex_scripts": {
+    "变量更新美化": { "id": "...", "findRegex": "...", "replace_file": "正则/变量更新美化.html" }
+  }
+}
+```
+
+**角色卡项目 - JSON 格式** (`form = "charactercard"`, `avatar` 为空):
+
+```json
+{
+  "projectName": "MyCharacter",
+  "worldbookName": "MyCharacter",
+  "form": "charactercard",
+  "mvu": false,
   "avatar": "",
   "first_messages": ["开场白/0.txt"],
   "extensions": {

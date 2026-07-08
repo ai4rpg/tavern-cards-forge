@@ -1,6 +1,8 @@
 import { dirname, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
 import { detailedParse } from '../util/prettified_parse.js';
 import { TavernCardsState } from '../type/state.js';
+import * as z from 'zod';
 import { readFileText } from '../util/file_io.js';
 import { validateAllFilePaths } from '../util/file_paths.js';
 import { buildWorldbookJson, buildCharacterPng, buildCharacterJson } from './build.js';
@@ -9,11 +11,10 @@ import { resolveProject, requireConfiguredProject } from '../cli/settings.js';
 import { detectMvu, validateMvuEnabledState } from '../util/detect_mvu.js';
 import {
   validateMvuInitvar,
-  checkSchemaTsContent,
-  isMvuZodScript,
   validateZodScriptContent,
   formatZodScriptValidationErrors,
-  resolveSchemaSyncInput,
+  prepareZodSync,
+  loadMvuSchema,
 } from '../util/mvu_schema.js';
 
 export async function runPack(project: string, opts: { state?: string; output?: string }) {
@@ -33,8 +34,18 @@ export async function runPack(project: string, opts: { state?: string; output?: 
     throw new Error('Missing files:\n' + missing.map(m => `  - ${m.path}`).join('\n'));
   }
 
+  // 预计算 zodSync（MVU 校验 + build 阶段复用，避免重复读盘）
+  let zodSync: { schemaContent: string; zodSubject: string } | undefined;
+
   // When mvu is declared, verify initvar entries & MVU script are actually present
   if (state.mvu) {
+    if (!state.zod) {
+      console.warn(
+        '⚠ MVU enabled but state.zod is missing; run `forge unpack` to auto-populate.\n' +
+        '  Zod validation and schema.ts consistency checks skipped.'
+      );
+    }
+
     // Resolve script_file → content so detectMvu can inspect imports
     let detectState = state;
     const scripts = state.extensions?.tavern_helper?.scripts;
@@ -60,43 +71,15 @@ export async function runPack(project: string, opts: { state?: string; output?: 
       throw new Error('state.mvu = true but no [InitVar] entry or MagVarUpdate script found');
     }
 
-    // 1. 校验 Zod 脚本内容（检查会导致运行时失效的模式）
-    // schema.ts 存在时：buildZodScriptFromSchemaTs 会移除 export type 并追加 register 块，
-    //   但 schema.ts 自身的裸 import（import ... from 'zod' / 'lodash'）会被原样保留——
-    //   这类裸模块标识符无法在浏览器中解析，必须拦截。用同步生成后的产物校验，复用同一检查逻辑。
-    // schema.ts 不存在时：直接校验磁盘上的 脚本/Zod.txt 原样内容（typeExport 仍可能触发）。
-    // resolveSchemaSyncInput 一次性完成读盘 + detect + build，避免重复读盘与重复 detect。
-    const resolvedScripts = detectState.extensions?.tavern_helper?.scripts;
-    const syncInput = resolveSchemaSyncInput(stateDir, resolvedScripts);
-    const schemaTsContent = syncInput?.schemaContent;
-
-    if (schemaTsContent) {
-      const schemaImportErrors = checkSchemaTsContent(schemaTsContent);
-      if (schemaImportErrors.length > 0) {
-        throw new Error(schemaImportErrors.join('\n'));
-      }
-    }
-
-    const zodSubject = syncInput?.zodSubject;
-
-    if (resolvedScripts) {
-      for (const [name, script] of Object.entries(resolvedScripts)) {
-        if (script.enabled === false) continue;
-        const content = script.content;
-        if (!content || !isMvuZodScript(content)) continue;
-        const subject = zodSubject ?? content;
-        const issues = validateZodScriptContent(subject);
-        const errors = formatZodScriptValidationErrors(
-          issues,
-          subject,
-          zodSubject
-            ? `"${name}" (generated from schema.ts)`
-            : `"${name}" (scripts/${name}.txt on disk)`,
-        );
-        if (errors.length > 0) {
-          throw new Error(errors.join('\n'));
-        }
-      }
+    // 1. Zod 脚本内容校验 + 预计算 zodSync
+    if (state.zod) {
+      zodSync = prepareZodSync(stateDir, state.zod);
+      const issues = validateZodScriptContent(zodSync.zodSubject);
+      const errors = formatZodScriptValidationErrors(
+        issues, zodSync.zodSubject,
+        `"${state.zod.scriptName}" (rebuilt from ${state.zod.schemaPath})`,
+      );
+      if (errors.length > 0) throw new Error(errors.join('\n'));
     }
 
     // 2. 校验 MVU 条目和脚本的启用状态
@@ -106,11 +89,17 @@ export async function runPack(project: string, opts: { state?: string; output?: 
     }
 
     // 3. 校验默认 initvar 与 schema.ts 一致性
-    // 传入已读 schemaTsContent，避免 validateMvuInitvar 内部再次读盘/重复预检
+    //    加载 Schema 实例一次，后续所有 initvar 校验复用（避免多次 jiti 初始化）
+    let schemaInstance: z.ZodType | undefined;
+    const schemaAbsPath = zodSync ? resolve(stateDir, state.zod!.schemaPath) : undefined;
+    if (schemaAbsPath && existsSync(schemaAbsPath)) {
+      schemaInstance = await loadMvuSchema(schemaAbsPath, { schemaContent: zodSync?.schemaContent });
+    }
+
     const result = await validateMvuInitvar(
       stateDir, state.entryManifest,
       undefined,
-      schemaTsContent ? { schemaContent: schemaTsContent } : undefined,
+      schemaInstance ? { schemaPath: schemaAbsPath!, schema: schemaInstance } : undefined,
     );
     if (result) {
       console.log(`✓ MVU validation passed: ${result.initvarPath} matches schema.ts`);
@@ -118,14 +107,13 @@ export async function runPack(project: string, opts: { state?: string; output?: 
       console.log('ℹ MVU project but schema.ts not found, skipping variable validation');
     }
 
-    // 4. 校验 initvar_overrides 中所有 override 文件
+    // 4. 校验 initvar_overrides 中所有 override 文件（复用同一 Schema 实例）
     if (state.initvar_overrides) {
-      for (const [greetingPath, overridePath] of Object.entries(state.initvar_overrides)) {
+      for (const [, overridePath] of Object.entries(state.initvar_overrides)) {
         const overrideResult = await validateMvuInitvar(
           stateDir, state.entryManifest, overridePath,
-          schemaTsContent ? { schemaContent: schemaTsContent } : undefined,
+          schemaInstance ? { schemaPath: schemaAbsPath!, schema: schemaInstance } : undefined,
         );
-        // overrideResult 为 null 时 schema.ts 不存在，已在步骤 3 提示
         if (overrideResult) {
           console.log(`✓ MVU validation passed: ${overridePath}`);
         }
@@ -141,15 +129,16 @@ export async function runPack(project: string, opts: { state?: string; output?: 
     console.log(`Packed worldbook → ${output}`);
   } else {
     const hasAvatar = state.avatar && state.avatar.trim() !== '';
+    const zodSubject = zodSync?.zodSubject;
 
     if (hasAvatar) {
-      const png = buildCharacterPng(state, stateDir, cardrc.depth_defaults);
+      const png = buildCharacterPng(state, stateDir, cardrc.depth_defaults, zodSubject);
       output ??= resolve(stateDir, `${state.projectName}.png`);
       mkdirSync(dirname(output), { recursive: true });
       writeFileSync(output, png);
       console.log(`Packed character (PNG) → ${output}`);
     } else {
-      const json = buildCharacterJson(state, stateDir, cardrc.depth_defaults);
+      const json = buildCharacterJson(state, stateDir, cardrc.depth_defaults, zodSubject);
       output ??= resolve(stateDir, `${state.projectName}.json`);
       mkdirSync(dirname(output), { recursive: true });
       writeFileSync(output, json);

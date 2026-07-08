@@ -1,176 +1,39 @@
 import { detectFileType, extractFromPng, readWorldbookJson } from './extract.js';
-import { parseRawEntry, rawEntriesToState } from './parse_raw.js';
+import { rawEntriesToState } from './parse_raw.js';
 import { flatEntriesToState } from './parse_flat_worldbook.js';
-import { analyzeEntryYamlContent, buildWrappedYamlContents } from './split_xml.js';
+import { buildCharacterMeta, isFlatWorldbookFormat, isCharacterCardJson } from './from_sillytavern.js';
+import { readAndValidateOldState, mergeWithExistingState } from './merge.js';
+import { detectAndExtractZodFromCard } from './zod_extract.js';
+import { writeEntryBody, buildContentLookup, writeStateWithEntries } from './write_entries.js';
 import { sanitizeFilename } from '../util/sanitize_filename.js';
 import { writeJson, writeFileRecursive, sortEntriesForSerialization } from '../util/file_io.js';
 import { resolve, dirname, basename, join } from 'node:path';
-import { mkdirSync } from 'node:fs';
-import type { SillyTavernEntry, SillyTavernTavernHelper, FlatWorldbookEntry } from '../type/sillytavern.js';
-import type { TavernCardsState, TavernHelper, EntryManifestLeaf } from '../type/state.js';
-import { resolveProject, ProjectNotFoundError, requireConfiguredProject } from '../cli/settings.js';
+import { mkdirSync, existsSync } from 'node:fs';
+import type { SillyTavernEntry, FlatWorldbookEntry } from '../type/sillytavern.js';
+import { resolveProject, ProjectNotFoundError } from '../cli/settings.js';
 import { stripCharaChunks } from '../pack/png_encode.js';
 import { detectMvu } from '../util/detect_mvu.js';
-import { isMvuZodScript, extractSchemaTsFromScript, extractInitvarOverrideFromGreeting } from '../util/mvu_schema.js';
+import { isMvuZodScript, extractInitvarOverrideFromGreeting } from '../util/mvu_schema.js';
 
 const DIR_ENTRIES = '世界书';
 const DIR_REGEX = '正则';
 const DIR_SCRIPTS = '脚本';
 const DIR_GREETINGS = '开场白';
 
-function convertRegexScriptsToState(raw: any[] | undefined): Record<string, any> | undefined {
-  if (!raw || !Array.isArray(raw)) return undefined;
-  const result: Record<string, any> = {};
-  for (const s of raw) {
-    const { scriptName, ...rest } = s;
-    if (rest.minDepth === null) delete rest.minDepth;
-    if (rest.maxDepth === null) delete rest.maxDepth;
-    const name = scriptName ?? s.id ?? `regex_${raw.indexOf(s)}`;
-    result[name] = rest;
-  }
-  return result;
-}
-
-function scriptsArrayToRecord(scripts: Array<Record<string, any>>): TavernHelper['scripts'] {
-  const scriptsRecord: Record<string, any> = {};
-  for (const s of scripts) {
-    const { name, ...rest } = s;
-    if (name) scriptsRecord[name] = rest;
-  }
-  return scriptsRecord as TavernHelper['scripts'];
-}
-
-function convertTavernHelperToState(raw: SillyTavernTavernHelper | undefined): TavernHelper | undefined {
-  if (!raw) return undefined;
-
-  const result: TavernHelper = {};
-
-  if (Array.isArray(raw)) {
-    for (const section of raw) {
-      if (!Array.isArray(section) || section.length < 2) continue;
-
-      const [key, value] = section;
-      if (key === 'scripts') {
-        result.scripts = scriptsArrayToRecord(value as Array<Record<string, any>>);
-      } else if (key === 'variables') {
-        result.variables = value as TavernHelper['variables'];
-      }
-    }
-  } else if (typeof raw === 'object') {
-    if (Array.isArray(raw.scripts)) {
-      result.scripts = scriptsArrayToRecord(raw.scripts);
-    }
-    if (raw.variables) {
-      result.variables = raw.variables as TavernHelper['variables'];
-    }
-  }
-
-  return result.scripts !== undefined || result.variables !== undefined ? result : undefined;
-}
-
-function buildCharacterMeta(data: any): Record<string, any> {
-  return {
-    description: data.data?.description ?? data.description ?? '',
-    first_messages: [
-      data.data?.first_mes ?? data.first_mes ?? '',
-      ...(data.data?.alternate_greetings ?? []),
-    ].filter(g => g && g.trim()),
-    creator: data.data?.creator ?? '',
-    creator_notes: data.data?.creator_notes ?? data.creatorcomment ?? '',
-    version: data.data?.character_version ?? '',
-    create_date: data.create_date ?? '',
-    extensions: {
-      tavern_helper: convertTavernHelperToState(data.data?.extensions?.tavern_helper),
-      talkativeness: data.data?.extensions?.talkativeness,
-      fav: data.data?.extensions?.fav,
-      world: data.data?.extensions?.world,
-      depth_prompt: data.data?.extensions?.depth_prompt,
-    },
-    regex_scripts: convertRegexScriptsToState(data.data?.extensions?.regex_scripts),
-  };
-}
-
-function isFlatWorldbookFormat(data: any): boolean {
-  if (!data.entries || typeof data.entries !== 'object') return false;
-  const firstEntry = Object.values(data.entries)[0] as any;
-  return firstEntry && 'order' in firstEntry && !('insertion_order' in firstEntry);
-}
-
-function isCharacterCardJson(data: any): boolean {
-  return data.spec && data.spec.startsWith('chara_card') && data.data;
-}
-
-function writeEntryBody(
-  leaf: EntryManifestLeaf,
-  entryName: string,
-  body: string,
-  outputDir: string,
-): void {
-  const analysis = analyzeEntryYamlContent(body);
-
-  if (analysis.kind === 'plain_yaml') {
-    const filename = `${sanitizeFilename(entryName)}.yaml`;
-    const relPath = join(DIR_ENTRIES, filename);
-    const absPath = join(outputDir, relPath);
-
-    writeFileRecursive(absPath, body);
-    delete leaf.contents;
-    leaf.path = relPath;
-    return;
-  }
-
-  if (analysis.kind === 'wrapped_yaml') {
-    delete leaf.path;
-    leaf.contents = buildWrappedYamlContents(analysis, entryName, DIR_ENTRIES, outputDir);
-    return;
-  }
-
-  const filename = `${sanitizeFilename(entryName)}.txt`;
-  const relPath = join(DIR_ENTRIES, filename);
-  const absPath = join(outputDir, relPath);
-
-  writeFileRecursive(absPath, body);
-  delete leaf.contents;
-  leaf.path = relPath;
-}
-
-function writeStateWithEntries(
-  state: TavernCardsState,
-  entries: Array<{ content?: string }>,
-  outputDir: string,
-) {
-  mkdirSync(outputDir, { recursive: true });
-
-  const entriesDir = join(outputDir, DIR_ENTRIES);
-  mkdirSync(entriesDir, { recursive: true });
-
-  let i = 0;
-  const allLeaves = Object.values(state.entryManifest).flatMap(e => Object.entries(e));
-  for (const [entryName, leaf] of allLeaves) {
-    const raw = entries[i];
-    i++;
-    if (!raw) continue;
-
-    const content = raw.content ?? '';
-    if (!content) {
-      delete leaf.contents;
-      leaf.path = '';
-      continue;
-    }
-
-    writeEntryBody(leaf, entryName, content, outputDir);
-  }
-
-  writeJson(resolve(outputDir, 'tavern-cards-state.json'), sortEntriesForSerialization(state));
-}
-
 export async function runUnpack(
   project: string,
-  opts: { file?: string; output?: string; raw?: boolean; split?: boolean },
+  opts: { file?: string; output?: string; state?: string; raw?: boolean; split?: boolean; fresh?: boolean },
 ) {
   const { artifactPath, statePath, projectFound } = resolveProject(project, { artifact: opts.file });
-  if (!projectFound && (!opts.file || !opts.output)) {
-    requireConfiguredProject(project, projectFound, 'Without a configured project, both --file and --output are required.');
+  if (!projectFound) {
+    const missing: string[] = [];
+    if (!opts.file) missing.push('--file');
+    if (!opts.state && !opts.fresh) missing.push('--state or --fresh');
+    // merge 模式: --output 可从 --state 推导（dirname）；fresh 模式: --output 必须显式指定
+    if (!opts.output && opts.fresh) missing.push('--output');
+    if (missing.length > 0) {
+      throw new Error(`Without a configured project, ${missing.join(', ')} are required.`);
+    }
   }
 
   if (!artifactPath) {
@@ -180,6 +43,11 @@ export async function runUnpack(
   const cwd = process.cwd();
   let filePath: string;
   let outputDir = opts.output;
+
+  // merge 模式下 --output 未指定时，从 --state 路径推导（state.json 所在目录即 output 目录）
+  if (!outputDir && opts.state) {
+    outputDir = dirname(resolve(cwd, opts.state));
+  }
 
   if (opts.file) {
     filePath = resolve(cwd, opts.file);
@@ -221,44 +89,41 @@ export async function runUnpack(
     characterMeta = buildCharacterMeta(data);
   } else {
     const { data } = readWorldbookJson(filePath);
-    
+
     if (isCharacterCardJson(data)) {
       name = data.name ?? data.data?.name ?? basename(filePath, '.json');
       worldbookName = data.data?.character_book?.name ?? name;
       form = 'charactercard';
-      
+
       if (data.data?.character_book?.entries) {
         rawEntries = data.data.character_book.entries;
       } else {
         rawEntries = [];
       }
 
-      characterMeta = {
-        description: data.data?.description ?? data.description ?? '',
-        first_messages: [
-          data.data?.first_mes ?? data.first_mes ?? '',
-          ...(data.data?.alternate_greetings ?? []),
-        ].filter(g => g && g.trim()),
-        creator: data.data?.creator ?? '',
-        creator_notes: data.data?.creator_notes ?? data.creatorcomment ?? '',
-        version: data.data?.character_version ?? '',
-        create_date: data.create_date ?? '',
-        extensions: {
-          tavern_helper: convertTavernHelperToState(data.data?.extensions?.tavern_helper),
-          talkativeness: data.data?.extensions?.talkativeness,
-          fav: data.data?.extensions?.fav,
-          world: data.data?.extensions?.world,
-          depth_prompt: data.data?.extensions?.depth_prompt,
-        },
-        regex_scripts: convertRegexScriptsToState(data.data?.extensions?.regex_scripts),
-      };
+      characterMeta = buildCharacterMeta(data);
     } else if (isFlatWorldbookFormat(data)) {
       name = data.name ?? basename(filePath, '.json');
       worldbookName = name;
       form = 'worldbook';
       const flatEntries = Object.values(data.entries ?? {}) as FlatWorldbookEntry[];
       const state = flatEntriesToState(flatEntries, name, worldbookName);
-      writeStateWithEntries(state, flatEntries, outputDir);
+
+      // merge 模式：合并已有 state 的分类/路径
+      // 注意：worldbook 形式下 form=worldbook，state schema 约束 mvu=false，
+      // 因此 Zod 脚本检测和 initvar_override 提取均不适用，无需执行。
+      // （charactercard 分支在 merge 前调用 detectAndExtractZodFromCard）
+      if (!opts.fresh) {
+        const oldStatePath = opts.state ?? statePath;
+        if (existsSync(oldStatePath)) {
+          const oldState = readAndValidateOldState(oldStatePath);
+          const mergedState = mergeWithExistingState(state, oldState);
+          Object.assign(state, mergedState);
+          console.log(`  Merged with existing state`);
+        }
+      }
+
+      writeStateWithEntries(state, buildContentLookup(flatEntries), outputDir);
       console.log(`Unpacked ${flatEntries.length} entries → ${outputDir}`);
       return;
     } else {
@@ -298,6 +163,20 @@ export async function runUnpack(
     state.mvu = true;
   }
 
+  // Zod 脚本检测（在 merge 之前执行，确保从干净角色卡数据提取）
+  detectAndExtractZodFromCard(state, outputDir);
+
+  // merge 模式：合并旧 state
+  if (!opts.fresh) {
+    const oldStatePath = opts.state ?? statePath;
+    if (existsSync(oldStatePath)) {
+      const oldState = readAndValidateOldState(oldStatePath);
+      const mergedState = mergeWithExistingState(state, oldState);
+      Object.assign(state, mergedState);
+      console.log(`  Merged with existing state`);
+    }
+  }
+
   if (avatarBuffer) {
     const avatarRelPath = 'avatar.png';
     const avatarAbsPath = join(outputDir, avatarRelPath);
@@ -310,21 +189,39 @@ export async function runUnpack(
   const entriesDir = join(outputDir, DIR_ENTRIES);
   mkdirSync(entriesDir, { recursive: true });
 
-  let i = 0;
+  // 按 uid/条目名查找 raw 内容，避免 merge 后位置索引错位
+  const contentLookup = buildContentLookup(rawEntries);
   const allLeaves = Object.values(state.entryManifest).flatMap(e => Object.entries(e));
   for (const [entryName, leaf] of allLeaves) {
-    const raw = rawEntries[i];
-    i++;
-    if (!raw) continue;
-
-    const content = raw.content ?? '';
-    if (!content) {
-      delete leaf.contents;
-      leaf.path = '';
+    const newContent = (leaf.uid != null ? contentLookup.get(leaf.uid) : undefined)
+      ?? contentLookup.get(entryName)
+      ?? '';
+    if (!newContent) {
+      if (!leaf.path && !leaf.contents) {
+        delete leaf.contents;
+        leaf.path = '';
+      }
       continue;
     }
 
-    writeEntryBody(leaf, entryName, content, outputDir);
+    // 统一走 writeEntryBody：根据新内容判定 .yaml/.txt/wrapped 语义，
+    // merge 模式下传入旧 path/contents 让 writeEntryBody 保留旧结构（仅调后缀）。
+    const oldPath = leaf.path;
+    const oldContents = leaf.contents;
+    const hadContents = !!oldContents;
+    const preserve = (oldPath || oldContents) ? { path: oldPath, contents: oldContents } : undefined;
+    writeEntryBody(leaf, entryName, newContent, outputDir, preserve);
+
+    // 检测存储方式变更：writeEntryBody 内部仅对 contents→path 输出警告，
+    // 此处补充 path→path 扩展名变更和 path→contents 的警告。
+    if (oldPath && oldPath !== leaf.path && !hadContents) {
+      // path → path 但扩展名不同（如 .txt → .yaml，preserve 模式下仅后缀校正）
+      console.log(`  ⚠ Entry "${entryName}" extension changed: ${oldPath} → ${leaf.path} — old file may be removed manually`);
+    } else if (oldPath && !leaf.path && leaf.contents) {
+      // path → contents（单文件 → 多片段 wrapped_yaml）
+      console.log(`  ⚠ Entry "${entryName}" storage changed: ${oldPath} → contents fragments — old file may be removed manually`);
+    }
+    // contents → path 的警告已在 writeEntryBody 内部输出，此处不重复
   }
 
   // --- 正则/ : regex_scripts replaceString ---
@@ -347,16 +244,20 @@ export async function runUnpack(
   }
 
   // --- 脚本/ : tavern_helper scripts content ---
+  // Zod 脚本已在 detectAndExtractZodFromCard 中从 scripts 积除，此处只处理普通脚本
   const tavernHelper = state.extensions?.tavern_helper;
   if (tavernHelper?.scripts && Object.keys(tavernHelper.scripts).length > 0) {
     const scriptsDir = join(outputDir, DIR_SCRIPTS);
     mkdirSync(scriptsDir, { recursive: true });
 
-    const enabledZodScripts: Array<{ name: string; content: string }> = [];
-
     for (const [scriptName, script] of Object.entries(tavernHelper.scripts)) {
       const content = script.content;
       if (!content) continue;
+      // 兜底：Zod 脚本应由 detectAndExtractZodFromCard 移除，若残留则跳过写入
+      if (isMvuZodScript(content)) {
+        console.warn(`⚠ Zod script "${scriptName}" still present in scripts after extraction; skipping write (managed by schema.ts + state.zod)`);
+        continue;
+      }
 
       const filename = `${sanitizeFilename(scriptName)}.txt`;
       const relPath = join(DIR_SCRIPTS, filename);
@@ -364,30 +265,7 @@ export async function runUnpack(
 
       writeFileRecursive(absPath, content);
       script.script_file = relPath;
-
-      // 收集启用的 Zod schema 脚本
-      if (isMvuZodScript(content) && script.enabled) {
-        enabledZodScripts.push({ name: scriptName, content });
-      }
-
       delete script.content;
-    }
-
-    // 从启用的 Zod 脚本生成 schema.ts
-    if (enabledZodScripts.length > 0) {
-      if (enabledZodScripts.length > 1) {
-        console.warn(`⚠ Found ${enabledZodScripts.length} enabled Zod scripts, will extract the first one "${enabledZodScripts[0].name}". Multiple Zod scripts may cause runtime behavior to be non-deterministic; consider disabling the extras.`);
-      }
-      const { name: zodName, content: zodContent } = enabledZodScripts[0];
-      const schemaTs = extractSchemaTsFromScript(zodContent);
-      if (schemaTs !== null) {
-        const schemaPath = join(outputDir, 'schema.ts');
-        writeFileRecursive(schemaPath, schemaTs);
-        console.log(`  Generated schema.ts (extracted from Zod script "${zodName}")`);
-      } else {
-        console.warn(`⚠ Zod script "${zodName}" is a compiled/minified artifact; cannot auto-extract schema.ts. ` +
-          `Please manually write schema.ts based on the Zod schema definition, or ask AI to assist.`);
-      }
     }
   }
 

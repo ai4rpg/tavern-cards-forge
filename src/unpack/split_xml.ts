@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { join, dirname, basename, extname } from 'node:path';
 import { sanitizeFilename } from '../util/sanitize_filename.js';
 import { isYaml, writeFileRecursive } from '../util/file_io.js';
 
@@ -122,10 +122,26 @@ export function buildWrappedYamlContents(
   entryName: string,
   entriesDir: string,
   outputDir: string,
+  preserveContents?: Array<{ content?: string; file?: string }>,
 ): Array<{ content?: string; file?: string }> {
-  const filename = `${sanitizeFilename(entryName)}.yaml`;
-  const relPath = join(entriesDir, filename);
-  const absPath = join(outputDir, relPath);
+  // 保留旧片段中的 file 路径（仅调后缀），否则用 sanitizeFilename 生成新路径
+  let relPath: string;
+  let absPath: string;
+  if (preserveContents) {
+    const oldFile = preserveContents.find(f => f.file);
+    if (oldFile?.file) {
+      const oldDir = dirname(oldFile.file);
+      const oldStem = basename(oldFile.file, extname(oldFile.file));
+      relPath = join(oldDir, `${oldStem}.yaml`);
+    } else {
+      const filename = `${sanitizeFilename(entryName)}.yaml`;
+      relPath = join(entriesDir, filename);
+    }
+  } else {
+    const filename = `${sanitizeFilename(entryName)}.yaml`;
+    relPath = join(entriesDir, filename);
+  }
+  absPath = join(outputDir, relPath);
 
   writeFileRecursive(absPath, analysis.yamlBody);
 

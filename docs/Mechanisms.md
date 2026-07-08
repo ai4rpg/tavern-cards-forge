@@ -227,19 +227,12 @@ pack 时根据 `form` 和 `avatar` 字段选择输出格式：
 
 1. **MVU 特征检测**（见上节） — 必须满足三个检测条件
 2. **[InitVar] 条目禁用校验** — 所有以 `[InitVar]` 开头的条目必须显式设置 `enabled: false`（SillyTavern 默认启用，运行时不应激活这些仅用于变量定义的条目）
-3. **schema.ts 预检** — 仅在项目根目录**有** `schema.ts` 时触发（[`checkSchemaTsContent`](../src/util/mvu_schema.ts)）：
+3. **Zod 脚本内容校验**（`state.zod` 存在时）— [`prepareZodSync`](../src/util/mvu_schema.ts) 一次性完成「读 `schema.ts` + 预检 import + 生成 Zod 脚本内容」，供后续 build 阶段复用：
    - `schema.ts` 不得包含任何 `import` 语句。`z`（Zod v4）与 `_`（lodash）已由 MVU 运行时作为全局注入，无需也不能 `import`；forge **不打包**额外 npm 包，因此裸模块 / 相对路径 / 绝对路径的 `import` 都会在浏览器解析阶段失败
    - 命中即整体终止并打印违法 import 列表，提示用户删除（**不要** `npm install`）
-4. **Zod 脚本内容校验** — `schema.ts` 存在与否均触发（[`validateZodScriptContent`](../src/util/mvu_schema.ts)）：
-   - `schema.ts` 存在时：用 [`buildZodScriptFromSchemaTs`](../src/util/mvu_schema.ts) 同步生成后的 Zod 脚本作为校验对象。此产物已剔除 `export type` 行，所以 `typeExport` 永不命中；但 `schema.ts` 自身的裸 `import`（如 `import { z } from 'zod'`、`import _ from 'lodash'`）会被原样保留进同步后的脚本，运行时崩溃，因此必须在校验前由步骤 3 拦截
-   - `schema.ts` 不存在时：直接校验磁盘上 `脚本/{name}.txt`（即 `script.script_file` / `script.content` 指向的原样内容），`typeExport` 与各 import 检查均生效
-   - 检查项（均会阻止打包）：
-     - `import ... from 'zod'`：裸模块标识符（bare module specifier）无法在浏览器中解析；删除该 import，`z` 已作为 MVU 运行时全局
-     - `import ... from 'lodash'`：同上，删除该 import，`_` 已作为全局
-     - 其他**非 URL** import（裸模块名 / 相对路径 / 绝对路径）：仅有 `https://` / `//` 开头的 CDN URL import 合法
-     - `export type ...`：TypeScript 语法不是合法 JavaScript，会触发 `SyntaxError`
-   - 错误信息由 [`formatZodScriptValidationErrors`](../src/util/mvu_schema.ts) 渲染，会附带命中的具体 import 语句
-5. **initvar 一致性校验** — 仅在项目根目录**有** `schema.ts` 时触发（[`validateMvuInitvar`](../src/util/mvu_schema.ts)）：
+   - 通过预检后用 [`buildZodScriptFromSchemaTs`](../src/util/mvu_schema.ts) 生成 Zod 脚本内容，再由 [`validateZodScriptContent`](../src/util/mvu_schema.ts) 校验是否含 `export type` 等运行时失效模式（import 相关检查已由上游预检覆盖）
+   - `state.zod` 缺失时输出警告，跳过 Zod 相关校验
+4. **initvar 一致性校验**（`state.zod` 存在且 `schema.ts` 文件存在时）— [`loadMvuSchema`](../src/util/mvu_schema.ts) 单次加载 `schema.ts` 导出的 Zod Schema 实例（避免多次 jiti 初始化），后续所有 initvar 文件复用同一实例：
    - 校验 `entryManifest` 中 `[InitVar]` 条目的 YAML 内容是否匹配 `schema.ts` 定义的 Zod Schema
    - 校验 `initvar_overrides` 中所有 override YAML 文件同样匹配该 Schema
    - 内部先执行步骤 3 的 schema.ts import 预检；pack 流程已读好 `schema.ts` 内容时会经 `options.schemaContent` 传入，避免对每个 override 重复读盘
@@ -248,27 +241,42 @@ pack 时根据 `form` 和 `avatar` 字段选择输出格式：
 
 ### Zod 脚本同步
 
-MVU Zod 方案中，`schema.ts` 是变量 Schema 的单一数据源，Zod 脚本（`tavern_helper.scripts` 中引用 `mvu_zod.js` 的脚本）从 `schema.ts` 自动生成。
+MVU Zod 方案中，`schema.ts` 是变量 Schema 的单一数据源，Zod 脚本（`tavern_helper.scripts` 中引用 `mvu_zod.js` 的脚本）从 `schema.ts` 自动生成。元数据固化在 `state.zod`（[`ZodDescriptor`](../src/type/state.ts)）中，pack 时据此重建脚本内容，unpack 时据此从 scripts 中提取并移除 Zod 脚本。
 
-**pack 方向**（`buildZodScriptFromSchemaTs`）：
-1. [`resolveSchemaSyncInput`](../src/util/mvu_schema.ts) 一次性完成「读 `schema.ts` + 检测启用 Zod 脚本的 `registerMvuSchema` CDN import URL + 生成同步后 Zod 脚本内容」，供后续 [build](../src/pack/build.ts) 同步与 [pack/index.ts](../src/pack/index.ts) 校验复用，避免两步各自重复读盘 / 重复 detect
-   - 检测 import URL 时同时支持 `script_file` 引用与内联 `content` 两种脚本表达方式（接受可选的 `resolveContent` 回调，调用方用它在循环外将 `script_file` 解析为文件内容，避免循环内重复读盘）
-   - 多个启用 Zod 脚本时取第一个的 import URL；保留 URL 是为了透明保留不同 jsdelivr CDN 域名，避免默认域名覆盖项目自选域名
-2. 生成 Zod 脚本内容：
-   - 移除 `export type` 行（TypeScript 语法在浏览器中不合法）
-   - 在顶部添加 `registerMvuSchema` 的 CDN import
-   - 在底部添加 `$(() => { registerMvuSchema(Schema); });` 注册调用
-3. 替换脚本的 `content` 字段为生成内容（`schema.ts` 不存在时原样透传）
+#### state.zod（ZodDescriptor）
 
-**unpack 方向**（`extractSchemaTsFromScript`）：
-1. 收集所有启用的 Zod 脚本（存在多个时取第一个，并警告其余可能被禁用）
-2. 逆向提取 `schema.ts`：
-   - 移除 `registerMvuSchema` 的 import 行
-   - 移除 `$(() => { ... })` 注册块
-   - 在文件末尾添加 `export type Schema = z.output<typeof Schema>;`
-3. 写入 `schema.ts` 到项目根目录
+| 字段 | 说明 |
+|------|------|
+| `scriptName` | 脚本名，即重建到 `tavern_helper.scripts` 时的 key |
+| `scriptId` | 来自角色卡的脚本 id（通常为 UUID）；pack 时原样回写以保持跨 pack 稳定 |
+| `schemaPath` | `schema.ts` 相对项目根目录的路径 |
+| `importUrl` | `registerMvuSchema` 的 CDN import URL |
+| `button` | 按钮配置（与 ST 默认值相同时省略） |
+| `info` | 脚本说明（与 ST 默认值相同时省略） |
+| `data` | 额外数据（与 ST 默认值相同时省略） |
 
-**压缩/编译脚本处理**：若 Zod 脚本为压缩产物（包含 `sourceMappingURL`、import 别名或超长单行），`extractSchemaTsFromScript` 返回 `null`，unpack 跳过自动提取，提示用户手动编写 `schema.ts`。
+`state.zod` 存在时隐含 `mvu=true`，Schema 层面校验 `zod` 存在时 `mvu` 必须为 `true`。
+
+#### pack 方向（state.zod → 重建 Zod 脚本）
+
+1. [`prepareZodSync`](../src/util/mvu_schema.ts) 从 `state.zod.schemaPath` 读取 `schema.ts`，预检 import，生成 Zod 脚本内容
+2. [`buildZodScriptEntry`](../src/util/mvu_schema.ts) 构造完整的 `TavernHelperScript` 条目：
+   - 使用固化的 `zod.scriptId` 保证跨 pack id 稳定
+   - `button` / `info` / `data` 三字段依据 [`restoreScriptDefaults`](../src/util/mvu_schema.ts) 恢复成 ST 端 `Script` schema 的完整默认值（`state.zod` 中被 strip 缺省的字段回填为 ST 默认）
+3. 注入回 `tavern_helper.scripts`（若 scripts 中已有同名 key 则覆盖并输出警告）
+4. 普通脚本仅解析 `script_file` → `content`，不再做 Zod 脚本检测与同步
+
+#### unpack 方向（Zod 脚本 → state.zod + 移除）
+
+1. [`detectAndExtractZodFromCard`](../src/unpack/zod_extract.ts) 在 merge 之前执行（确保从干净角色卡数据提取）：
+   - 检测 `tavern_helper.scripts` 中所有 Zod 脚本（含 `registerMvuSchema` import 的脚本）
+   - 从第一个 Zod 脚本提取元数据（scriptId、importUrl、button/info/data），写入 `state.zod`
+   - [`stripScriptDefaults`](../src/util/mvu_schema.ts) 将与 ST 默认值相同的 button/info/data 剥离，保持 state 极简
+   - 从 scripts 中移除 Zod 脚本条目（不再写出为 `脚本/{name}.txt`）
+2. 若 Zod 脚本为压缩/编译产物，仅记录警告，`state.zod` 仍会填充（importUrl 从压缩代码检测）
+3. 脚本写出阶段跳过残留的 Zod 脚本（兜底检查）
+
+**压缩/编译脚本处理**：若 Zod 脚本为压缩产物（包含 `sourceMappingURL`、import 别名或超长单行），`extractSchemaTsFromScript` 返回 `null`，unpack 跳过自动提取 `schema.ts`，提示用户手动编写。
 
 ### initvar_override 嵌入与提取
 
@@ -282,8 +290,9 @@ MVU Zod 方案中，`schema.ts` 是变量 Schema 的单一数据源，Zod 脚本
 **unpack 方向**（`extractInitvarOverrideFromGreeting`）：
 1. 检测开场白内容中的 `<UpdateVariable><initvar>` 块
 2. 将 YAML 内容写入 `开场白/initvar/{index}.yaml`
-3. 移除块后，清理后的内容写入 `开场白/{index}.txt`
-4. 填充 `state.initvar_overrides["开场白/{index}.txt"] = "开场白/initvar/{index}.yaml"`
+3. 移除块及其紧邻的尾部空行（若存在），尽量保留原始排版，不会误伤文档其他位置的空行
+4. 清理后的内容写入 `开场白/{index}.txt`
+5. 填充 `state.initvar_overrides["开场白/{index}.txt"] = "开场白/initvar/{index}.yaml"`
 
 ## 编码检测
 

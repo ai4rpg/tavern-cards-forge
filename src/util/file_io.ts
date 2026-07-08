@@ -84,7 +84,7 @@ export function sortEntriesForSerialization(state: TavernCardsState): TavernCard
 
 export function isYaml(text: string): boolean {
   try {
-    const doc = yaml.parse(text, { strict: false, mapAsMap: true });
+    const doc = yaml.parse(text, { strict: false, mapAsMap: true, logLevel: 'error' });
     return doc !== null && (typeof doc === 'object' || doc instanceof Map);
   } catch {
     return false;

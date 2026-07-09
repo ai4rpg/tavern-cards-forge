@@ -2,52 +2,8 @@ import { join, dirname, basename, extname } from 'node:path';
 import { sanitizeFilename } from '../util/sanitize_filename.js';
 import { isYaml, writeFileRecursive } from '../util/file_io.js';
 
-const XML_TAG_REGEX = /^<(\w+)>\s*$/;
-const XML_CLOSE_REGEX = /^<\/(\w+)>\s*$/;
 const XML_OPEN_LINE_REGEX = /^<([A-Za-z_][\w:-]*)(\s+[^<>]*)?>\s*$/;
 const XML_CLOSE_LINE_REGEX = /^<\/([A-Za-z_][\w:-]*)>\s*$/;
-
-export function splitXmlTags(content: string): Array<{ content: string; file?: string }> {
-  const lines = content.split('\n');
-  const result: Array<{ content: string; file?: string }> = [];
-  const buffer: string[] = [];
-  let openTag: string | null = null;
-
-  function flushBuffer() {
-    if (buffer.length > 0) {
-      result.push({ content: buffer.join('\n') });
-      buffer.length = 0;
-    }
-  }
-
-  for (const line of lines) {
-    const openMatch = line.match(XML_TAG_REGEX);
-    const closeMatch = line.match(XML_CLOSE_REGEX);
-
-    if (openMatch && !openTag) {
-      flushBuffer();
-      openTag = openMatch[1];
-      result.push({ content: line });
-      continue;
-    }
-
-    if (closeMatch && openTag && closeMatch[1] === openTag) {
-      buffer.push(line);
-      flushBuffer();
-      openTag = null;
-      continue;
-    }
-
-    buffer.push(line);
-  }
-  flushBuffer();
-
-  return result;
-}
-
-export function shouldSplitXml(content: string): boolean {
-  return XML_TAG_REGEX.test(content.split('\n')[0] ?? '');
-}
 
 export type EntryYamlAnalysis =
   | { kind: 'plain_yaml' }

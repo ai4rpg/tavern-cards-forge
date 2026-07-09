@@ -2,7 +2,7 @@ import { crc32 } from 'crc';
 import PNGtext from 'png-chunk-text';
 import extract from 'png-chunks-extract';
 
-export function encodePng(chunks: Array<{ name: string; data: Uint8Array }>): Uint8Array {
+function encodePng(chunks: Array<{ name: string; data: Uint8Array }>): Uint8Array {
   const uint8 = new Uint8Array(4);
   const int32 = new Int32Array(uint8.buffer);
   const uint32 = new Uint32Array(uint8.buffer);

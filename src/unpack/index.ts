@@ -22,7 +22,7 @@ const DIR_GREETINGS = '开场白';
 
 export async function runUnpack(
   project: string,
-  opts: { file?: string; output?: string; state?: string; raw?: boolean; split?: boolean; fresh?: boolean },
+  opts: { file?: string; output?: string; state?: string; raw?: boolean; fresh?: boolean },
 ) {
   const { artifactPath, statePath, projectFound } = resolveProject(project, { artifact: opts.file });
   if (!projectFound) {

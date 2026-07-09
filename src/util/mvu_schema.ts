@@ -98,7 +98,7 @@ export function buildZodScriptFromSchemaTs(schemaTsContent: string, importUrl?: 
  * 检测 Zod 脚本是否为压缩/编译产物
  * 压缩脚本的特征：sourceMappingURL、import 别名、单行超长代码
  */
-export function isMinifiedZodScript(content: string): boolean {
+function isMinifiedZodScript(content: string): boolean {
   // sourceMappingURL 是构建工具的明确标记
   if (content.includes('sourceMappingURL')) return true;
 

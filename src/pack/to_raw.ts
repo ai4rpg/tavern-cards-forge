@@ -117,17 +117,6 @@ export function toSillyTavernEntry(
   };
 }
 
-export function buildSillyTavernWorldbook(
-  leaves: Array<EntryManifestLeaf & { name: string; content: string }>,
-  name: string,
-  depthDefaults?: CardrcConfig['depth_defaults'],
-): { entries: SillyTavernEntry[]; name: string } {
-  return {
-    name,
-    entries: leaves.map((leaf, i) => toSillyTavernEntry(leaf, i, depthDefaults)),
-  };
-}
-
 export function buildSillyTavernCharacter(
   state: {
     projectName: string;

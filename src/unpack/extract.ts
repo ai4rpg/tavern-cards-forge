@@ -1,6 +1,6 @@
 import { extractCharaFromPng } from '../pack/png_encode.js';
 import { readFileSync } from 'node:fs';
-import { extname, resolve, basename } from 'node:path';
+import { extname } from 'node:path';
 
 export function extractFromPng(pngPath: string): { type: 'character'; data: any; imageBuffer: Buffer } {
   const image = readFileSync(pngPath);

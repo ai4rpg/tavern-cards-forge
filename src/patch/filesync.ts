@@ -1,4 +1,4 @@
-import { renameSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { renameSync, existsSync, mkdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import type { FileOperation } from './patterns.js';
 

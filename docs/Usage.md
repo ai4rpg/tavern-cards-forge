@@ -128,7 +128,6 @@ tavern-cards-forge unpack <project> [选项]
 | `--output <dir>` | 覆盖输出目录；merge 模式下可从 `--state` 推导；`--fresh` 模式下未注册项目时必需 |
 | `--state <path>` | 指定已有 state.json 路径用于合并（merge 模式）；与 `--fresh` 互斥；`--output` 未指定时默认取其所在目录 |
 | `--raw` | 输出原始 SillyTavern JSON（不转换） |
-| `--split` | 拆分长内容为独立文件 |
 | `--fresh` | 跳过与已有 state 合并，直接覆盖输出（全新解包）；与 `--state` 互斥 |
 
 **行为：**

@@ -1,6 +1,5 @@
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
-import { resolve, basename, dirname } from 'node:path';
-import { readFileText, writeJson } from '../util/file_io.js';
+import { resolve } from 'node:path';
 
 export function createBackup(statePath: string, projectName: string, rootDir: string): string {
   const historyDir = resolve(rootDir, '.patch-history', projectName);

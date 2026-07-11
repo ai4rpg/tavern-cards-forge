@@ -140,9 +140,11 @@ tavern-cards-forge unpack <project> [选项]
 4. **MVU 自动检测**：满足条件时自动设置 `mvu: true`（详见 [机制原理](Mechanisms.md#mvu-检测)）
 5. **Zod 脚本检测与提取**：从 `tavern_helper.scripts` 中检测 MVU Zod 脚本，提取元数据写入 `state.zod`，并从 scripts 中移除该 Zod 脚本（不再写出为 `脚本/{name}.txt`）。若脚本为压缩/编译产物则仅记录警告（详见 [机制原理](Mechanisms.md#zod-脚本同步)）
 6. **merge 模式**（默认，即未指定 `--fresh` 时）：若 `--state` 指向的 state.json 或项目配置的 state 文件存在，将已有 state 的分类/路径等信息合并到新解包的 state 中。`--output` 未指定时从 `--state` 路径推导（取其所在目录）
+   - **条目匹配**：第一轮按条目名（comment）匹配；未命中的新条目进入第二轮，按归一化后的内容匹配旧条目（容忍换行风格和空白差异），检测重命名
+   - **旧条目移除**：新卡中不存在的旧条目，其文件保留在原位不删除，末尾汇总输出未匹配文件路径
 7. 每个条目的 content 处理：
-   - 按 uid/条目名匹配内容（merge 后位置索引可能错位，使用 uid 优先匹配）
-   - **fresh 模式**：内容解析为 YAML 对象时保存为 `世界书/{name}.yaml`；内容为 XML 标签包裹的 YAML（如 `@@if` + `<tag>`）时拆分为 `contents` 片段；其余保存为 `世界书/{name}.txt`。文件名经 `sanitizeFilename` 净化特殊字符
+   - 按条目名匹配内容
+   - **fresh 模式**：内容解析为 YAML 对象时保存为 `世界书/{name}.yaml`；内容为 XML 标签包裹的 YAML（如 `@@if` + `<tag>`）时拆分为 `contents` 片段；其余保存为 `世界书/{name}.txt`。文件名经 `sanitizeFilename` 净化特殊字符，同名文件自动添加 `_1`、`_2` 后缀避免覆盖
    - **merge 模式**：保留旧 state 的目录结构和文件名主体，仅根据新内容格式调整后缀（`.yaml` ↔ `.txt`）。旧 `contents` 片段路径同样保留。新增条目走 fresh 模式的完整自动判定
    - 存储方式变更时（如 `.txt` → `.yaml`、`path` ↔ `contents`）输出警告提示手动清理旧文件
 8. `regex_scripts` 中每个脚本的 `replaceString` 写入 `正则/{name}.txt`（如果非空），并设置 `replace_file` 字段
@@ -198,9 +200,9 @@ tavern-cards-forge configure <project> --force
 **填充模式：**
 
 - **默认模式**：仅填充缺失字段（已有值保持不变）
-- **`--force` 模式**：覆盖所有推导字段（strategy、position、uid）
+- **`--force` 模式**：覆盖所有推导字段（strategy、position、order）
 
-推导的具体算法（验证规则、策略推导、位置推导、排序分配、UID 分配）详见 [机制原理](Mechanisms.md#configure-推导算法)。
+推导的具体算法（验证规则、策略推导、位置推导、排序分配）详见 [机制原理](Mechanisms.md#configure-推导算法)。
 
 ### init
 
@@ -322,11 +324,10 @@ tavern-cards-forge query <project> '$.form'
 # 条目名称列表（*~ 获取 key）
 tavern-cards-forge query <project> '$.entryManifest.character.*~'
 
-# 所有条目的 uid
-tavern-cards-forge query <project> '$.entryManifest[*][*].uid'
-
-# 嵌套字段
+# 所有条目的策略类型
 tavern-cards-forge query <project> '$.entryManifest[*][*].strategy.type'
+
+# 条目的插入顺序
 tavern-cards-forge query <project> '$.entryManifest[*][*].position.order'
 
 # 过滤表达式

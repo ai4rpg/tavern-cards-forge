@@ -40,7 +40,6 @@ export const EntryManifestLeaf = z.object({
   abstract: z.string().describe('条目内容摘要'),
   contents: z.array(ContentFragment).optional()
     .describe('有序内容片段列表, 与 path 互斥'),
-  uid: z.number().optional().describe('条目唯一标识符, 未设置或重复时自动分配'),
   enabled: z.boolean().optional().describe('是否启用'),
   strategy: z.object({
     type: StrategyType,

@@ -58,7 +58,6 @@ export function parseRawEntry(raw: SillyTavernEntry, index: number): EntryManife
 
   const leaf: EntryManifestLeaf = {
     abstract: '',
-    uid: raw.id ?? index,
     enabled: raw.enabled,
     strategy: {
       type: strategyType,

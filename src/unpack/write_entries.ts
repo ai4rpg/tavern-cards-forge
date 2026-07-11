@@ -1,7 +1,7 @@
 import { resolve, dirname, basename, extname, join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { analyzeEntryYamlContent, buildWrappedYamlContents } from './split_xml.js';
-import { sanitizeFilename } from '../util/sanitize_filename.js';
+import { sanitizeFilename, findAvailablePath } from '../util/sanitize_filename.js';
 import { writeJson, writeFileRecursive, sortEntriesForSerialization } from '../util/file_io.js';
 import type { EntryManifestLeaf, TavernCardsState } from '../type/state.js';
 
@@ -15,6 +15,7 @@ const DIR_ENTRIES = '世界书';
  * @param body 条目原始内容
  * @param outputDir 输出目录绝对路径
  * @param preserve merge 模式下保留的旧存储格式；提供时尊重旧路径/片段结构
+ * @param reservedPaths 已占用的相对路径集合（写入后自动登记，防止后续条目撞名）
  */
 
 export function writeEntryBody(
@@ -22,6 +23,7 @@ export function writeEntryBody(
   entryName: string,
   body: string,
   outputDir: string,
+  reservedPaths: Set<string>,
   preserve?: { path?: string; contents?: Array<{ content?: string; file?: string }> },
 ): void {
   const analysis = analyzeEntryYamlContent(body);
@@ -38,6 +40,12 @@ export function writeEntryBody(
     writeFileRecursive(absPath, body);
     delete leaf.contents;
     leaf.path = relPath;
+    reservedPaths.add(relPath);
+
+    // 检测扩展名变更（如 .txt → .yaml）
+    if (preserve.path !== relPath) {
+      console.log(`  ⚠ Entry "${entryName}" extension changed: ${preserve.path} → ${relPath} — old file may be removed manually`);
+    }
     return;
   }
 
@@ -46,7 +54,11 @@ export function writeEntryBody(
     if (analysis.kind === 'wrapped_yaml') {
       // 新内容仍是 wrapped_yaml：保留旧片段结构，更新内容和路径后缀
       delete leaf.path;
-      leaf.contents = buildWrappedYamlContents(analysis, entryName, DIR_ENTRIES, outputDir, preserve.contents);
+      leaf.contents = buildWrappedYamlContents(analysis, entryName, DIR_ENTRIES, outputDir, reservedPaths, preserve.contents);
+      // 登记 wrapped_yaml 所有片段路径
+      for (const frag of leaf.contents) {
+        if (frag.file) reservedPaths.add(frag.file);
+      }
       return;
     }
 
@@ -64,47 +76,51 @@ export function writeEntryBody(
     writeFileRecursive(absPath, body);
     delete leaf.contents;
     leaf.path = relPath;
+    reservedPaths.add(relPath);
     console.log(`  ⚠ Entry "${entryName}" storage changed: contents fragments → ${relPath} — old fragment files may be removed manually`);
     return;
   }
 
   // --- fresh 模式 / 新增条目：完整自动判定逻辑 ---
   if (analysis.kind === 'plain_yaml') {
-    const filename = `${sanitizeFilename(entryName)}.yaml`;
-    const relPath = join(DIR_ENTRIES, filename);
+    const relPath = findAvailablePath(DIR_ENTRIES, sanitizeFilename(entryName), '.yaml', reservedPaths);
     const absPath = join(outputDir, relPath);
 
     writeFileRecursive(absPath, body);
     delete leaf.contents;
     leaf.path = relPath;
+    reservedPaths.add(relPath);
     return;
   }
 
   if (analysis.kind === 'wrapped_yaml') {
     delete leaf.path;
-    leaf.contents = buildWrappedYamlContents(analysis, entryName, DIR_ENTRIES, outputDir);
+    leaf.contents = buildWrappedYamlContents(analysis, entryName, DIR_ENTRIES, outputDir, reservedPaths);
+    // 登记 wrapped_yaml 所有片段路径
+    for (const frag of leaf.contents) {
+      if (frag.file) reservedPaths.add(frag.file);
+    }
     return;
   }
 
-  const filename = `${sanitizeFilename(entryName)}.txt`;
-  const relPath = join(DIR_ENTRIES, filename);
+  // not_yaml 兜底：写入 .txt 单文件
+  const relPath = findAvailablePath(DIR_ENTRIES, sanitizeFilename(entryName), '.txt', reservedPaths);
   const absPath = join(outputDir, relPath);
 
   writeFileRecursive(absPath, body);
   delete leaf.contents;
   leaf.path = relPath;
+  reservedPaths.add(relPath);
 }
 
-/** 内容查找表：按 uid 或条目名查找 raw 内容，避免 merge 后位置索引错位 */
-export type ContentLookup = Map<number | string, string>;
+/** 内容查找表：按条目名查找 raw 内容 */
+export type ContentLookup = Map<string, string>;
 
-/** 从 raw 条目数组构建内容查找表（uid/comment → content） */
-export function buildContentLookup(entries: readonly { id?: number; uid?: number; comment?: string; content?: string }[]): ContentLookup {
+/** 从 raw 条目数组构建内容查找表（comment → content） */
+export function buildContentLookup(entries: readonly { comment?: string; content?: string }[]): ContentLookup {
   const lookup: ContentLookup = new Map();
   for (const entry of entries) {
     const content = entry.content ?? '';
-    const uid = entry.id ?? entry.uid;
-    if (uid != null) lookup.set(uid, content);
     if (entry.comment) lookup.set(entry.comment, content);
   }
   return lookup;
@@ -114,26 +130,31 @@ export function writeStateWithEntries(
   state: TavernCardsState,
   contentLookup: ContentLookup,
   outputDir: string,
+  reservedPaths: Set<string>,
 ) {
   mkdirSync(outputDir, { recursive: true });
 
   const entriesDir = join(outputDir, DIR_ENTRIES);
   mkdirSync(entriesDir, { recursive: true });
 
-  const allLeaves = Object.values(state.entryManifest).flatMap(e => Object.entries(e));
+  // 按 entryName 排序，保证 findAvailablePath 后缀分配稳定（不受对象 key 顺序影响）
+  const allLeaves = Object.values(state.entryManifest)
+    .flatMap(e => Object.entries(e))
+    .sort(([a], [b]) => a.localeCompare(b));
+
   for (const [entryName, leaf] of allLeaves) {
-    const content = (leaf.uid != null ? contentLookup.get(leaf.uid) : undefined)
-      ?? contentLookup.get(entryName)
-      ?? '';
+    const content = contentLookup.get(entryName) ?? '';
     if (!content) {
-      delete leaf.contents;
-      leaf.path = '';
+      if (!leaf.path && !leaf.contents) {
+        delete leaf.contents;
+        leaf.path = '';
+      }
       continue;
     }
 
     // merge 后 leaf 可能已有旧 path/contents，传入 preserve 让 writeEntryBody 保留旧结构
     const preserve = (leaf.path || leaf.contents) ? { path: leaf.path, contents: leaf.contents } : undefined;
-    writeEntryBody(leaf, entryName, content, outputDir, preserve);
+    writeEntryBody(leaf, entryName, content, outputDir, reservedPaths, preserve);
   }
 
   writeJson(resolve(outputDir, 'tavern-cards-state.json'), sortEntriesForSerialization(state));

@@ -68,8 +68,8 @@ export function sortEntriesForSerialization(state: TavernCardsState): TavernCard
   const newManifest: typeof state.entryManifest = {};
   for (const [typeName, entries] of Object.entries(state.entryManifest)) {
     const sortedEntries = Object.entries(entries).sort(([, a], [, b]) => {
-      const ai = a.display_index ?? a.uid ?? 0;
-      const bi = b.display_index ?? b.uid ?? 0;
+      const ai = a.display_index ?? 0;
+      const bi = b.display_index ?? 0;
       return ai - bi;
     });
     const orderedEntries: Record<string, typeof entries[string]> = {};

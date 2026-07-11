@@ -4,9 +4,9 @@ import { flatEntriesToState } from './parse_flat_worldbook.js';
 import { buildCharacterMeta, isFlatWorldbookFormat, isCharacterCardJson } from './from_sillytavern.js';
 import { readAndValidateOldState, mergeWithExistingState } from './merge.js';
 import { detectAndExtractZodFromCard } from './zod_extract.js';
-import { writeEntryBody, buildContentLookup, writeStateWithEntries } from './write_entries.js';
+import { buildContentLookup, writeStateWithEntries } from './write_entries.js';
 import { sanitizeFilename } from '../util/sanitize_filename.js';
-import { writeJson, writeFileRecursive, sortEntriesForSerialization } from '../util/file_io.js';
+import { writeJson, writeFileRecursive } from '../util/file_io.js';
 import { resolve, dirname, basename, join } from 'node:path';
 import { mkdirSync, existsSync } from 'node:fs';
 import type { SillyTavernEntry, FlatWorldbookEntry } from '../type/sillytavern.js';
@@ -15,7 +15,6 @@ import { stripCharaChunks } from '../pack/png_encode.js';
 import { detectMvu } from '../util/detect_mvu.js';
 import { isMvuZodScript, extractInitvarOverrideFromGreeting } from '../util/mvu_schema.js';
 
-const DIR_ENTRIES = '世界书';
 const DIR_REGEX = '正则';
 const DIR_SCRIPTS = '脚本';
 const DIR_GREETINGS = '开场白';
@@ -113,17 +112,26 @@ export async function runUnpack(
       // 注意：worldbook 形式下 form=worldbook，state schema 约束 mvu=false，
       // 因此 Zod 脚本检测和 initvar_override 提取均不适用，无需执行。
       // （charactercard 分支在 merge 前调用 detectAndExtractZodFromCard）
+      // reservedPaths 始终初始化（fresh 模式下也需防止新增条目互相撞名）
+      const reservedPaths = new Set<string>();
+      let mergeReservedPaths: Set<string> | undefined;
       if (!opts.fresh) {
         const oldStatePath = opts.state ?? statePath;
         if (existsSync(oldStatePath)) {
           const oldState = readAndValidateOldState(oldStatePath);
-          const mergedState = mergeWithExistingState(state, oldState);
+          const oldStateDir = dirname(oldStatePath);
+          const { state: mergedState, reservedPaths: rp } = mergeWithExistingState(state, oldState, oldStateDir, buildContentLookup(flatEntries));
           Object.assign(state, mergedState);
+          for (const p of rp) reservedPaths.add(p);
+          mergeReservedPaths = rp;
           console.log(`  Merged with existing state`);
         }
       }
 
-      writeStateWithEntries(state, buildContentLookup(flatEntries), outputDir);
+      writeStateWithEntries(state, buildContentLookup(flatEntries), outputDir, reservedPaths);
+      if (mergeReservedPaths && mergeReservedPaths.size > 0) {
+        console.log(`  ℹ ${mergeReservedPaths.size} file(s) from removed entries preserved on disk (not tracked by new state): ${[...mergeReservedPaths].join(', ')}`);
+      }
       console.log(`Unpacked ${flatEntries.length} entries → ${outputDir}`);
       return;
     } else {
@@ -166,13 +174,18 @@ export async function runUnpack(
   // Zod 脚本检测（在 merge 之前执行，确保从干净角色卡数据提取）
   detectAndExtractZodFromCard(state, outputDir);
 
-  // merge 模式：合并旧 state
+  // reservedPaths 始终初始化（fresh 模式下也需防止新增条目互相撞名）
+  const reservedPaths = new Set<string>();
+  let mergeReservedPaths: Set<string> | undefined;
   if (!opts.fresh) {
     const oldStatePath = opts.state ?? statePath;
     if (existsSync(oldStatePath)) {
       const oldState = readAndValidateOldState(oldStatePath);
-      const mergedState = mergeWithExistingState(state, oldState);
+      const oldStateDir = dirname(oldStatePath);
+      const { state: mergedState, reservedPaths: rp } = mergeWithExistingState(state, oldState, oldStateDir, buildContentLookup(rawEntries));
       Object.assign(state, mergedState);
+      for (const p of rp) reservedPaths.add(p);
+      mergeReservedPaths = rp;
       console.log(`  Merged with existing state`);
     }
   }
@@ -183,45 +196,6 @@ export async function runUnpack(
     const cleanAvatar = stripCharaChunks(avatarBuffer);
     writeFileRecursive(avatarAbsPath, cleanAvatar);
     state.avatar = avatarRelPath;
-  }
-
-  // --- 世界书/ : entry content files ---
-  const entriesDir = join(outputDir, DIR_ENTRIES);
-  mkdirSync(entriesDir, { recursive: true });
-
-  // 按 uid/条目名查找 raw 内容，避免 merge 后位置索引错位
-  const contentLookup = buildContentLookup(rawEntries);
-  const allLeaves = Object.values(state.entryManifest).flatMap(e => Object.entries(e));
-  for (const [entryName, leaf] of allLeaves) {
-    const newContent = (leaf.uid != null ? contentLookup.get(leaf.uid) : undefined)
-      ?? contentLookup.get(entryName)
-      ?? '';
-    if (!newContent) {
-      if (!leaf.path && !leaf.contents) {
-        delete leaf.contents;
-        leaf.path = '';
-      }
-      continue;
-    }
-
-    // 统一走 writeEntryBody：根据新内容判定 .yaml/.txt/wrapped 语义，
-    // merge 模式下传入旧 path/contents 让 writeEntryBody 保留旧结构（仅调后缀）。
-    const oldPath = leaf.path;
-    const oldContents = leaf.contents;
-    const hadContents = !!oldContents;
-    const preserve = (oldPath || oldContents) ? { path: oldPath, contents: oldContents } : undefined;
-    writeEntryBody(leaf, entryName, newContent, outputDir, preserve);
-
-    // 检测存储方式变更：writeEntryBody 内部仅对 contents→path 输出警告，
-    // 此处补充 path→path 扩展名变更和 path→contents 的警告。
-    if (oldPath && oldPath !== leaf.path && !hadContents) {
-      // path → path 但扩展名不同（如 .txt → .yaml，preserve 模式下仅后缀校正）
-      console.log(`  ⚠ Entry "${entryName}" extension changed: ${oldPath} → ${leaf.path} — old file may be removed manually`);
-    } else if (oldPath && !leaf.path && leaf.contents) {
-      // path → contents（单文件 → 多片段 wrapped_yaml）
-      console.log(`  ⚠ Entry "${entryName}" storage changed: ${oldPath} → contents fragments — old file may be removed manually`);
-    }
-    // contents → path 的警告已在 writeEntryBody 内部输出，此处不重复
   }
 
   // --- 正则/ : regex_scripts replaceString ---
@@ -314,6 +288,10 @@ export async function runUnpack(
     }
   }
 
-  writeJson(resolve(outputDir, 'tavern-cards-state.json'), sortEntriesForSerialization(state));
+  // --- 条目写入 + state.json ---
+  writeStateWithEntries(state, buildContentLookup(rawEntries), outputDir, reservedPaths);
+  if (mergeReservedPaths && mergeReservedPaths.size > 0) {
+    console.log(`  ℹ ${mergeReservedPaths.size} file(s) from removed entries preserved on disk (not tracked by new state): ${[...mergeReservedPaths].join(', ')}`);
+  }
   console.log(`Unpacked ${rawEntries.length} entries → ${outputDir}`);
 }

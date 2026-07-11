@@ -122,8 +122,7 @@
         "scope": "specific",
         "part": "basic",
         "keywords": ["Alice"],
-        "enabled": true,
-        "uid": 0
+        "enabled": true
       }
     }
   }
@@ -158,7 +157,6 @@
 | `part` | string? | 规划 | 同类型内的子分类标识 |
 | `rephrase` | boolean? | 规划 | 是否为重述/澄清条目 |
 | `keywords` | string[] | 规划 | 绿灯关键词候选 |
-| `uid` | number? | 运行时 | 条目唯一标识符（由 configure 推导） |
 | `enabled` | boolean? | 运行时 | 是否启用（由 configure 推导） |
 | `strategy` | object? | 运行时 | 激活策略（由 configure 推导） |
 | `position` | object? | 运行时 | 插入位置（由 configure 推导） |

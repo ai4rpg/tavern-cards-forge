@@ -56,7 +56,6 @@ export function parseFlatEntry(flat: FlatWorldbookEntry, index: number): EntryMa
 
   const leaf: EntryManifestLeaf = {
     abstract: '',
-    uid: flat.uid ?? index,
     enabled: !(flat.disable ?? false),
     strategy: {
       type: strategyType,

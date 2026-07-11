@@ -29,17 +29,53 @@ export function readAndValidateOldState(path: string): TavernCardsState {
   return result.data;
 }
 
+/** 合并单个条目：角色卡侧字段取新值，状态侧字段保留旧值 */
+function mergeLeaf(newLeaf: EntryManifestLeaf, oldLeaf: EntryManifestLeaf): EntryManifestLeaf {
+  return {
+    ...newLeaf,
+    // --- 状态侧字段：保留旧 leaf ---
+    path: oldLeaf.path,
+    contents: oldLeaf.contents,
+    scope: oldLeaf.scope,
+    part: oldLeaf.part,
+    rephrase: oldLeaf.rephrase,
+    // abstract 是必填字段：保留旧值（新值来自解析器，始终为空串）
+    abstract: oldLeaf.abstract ?? '',
+  };
+}
+
+/** 获取条目的正文内容文本（优先读 contents 内联，其次读 path 文件） */
+function getEntryText(leaf: EntryManifestLeaf, baseDir?: string): string {
+  if (leaf.contents && leaf.contents.length > 0) {
+    return leaf.contents.map(f => f.content ?? '').join('');
+  }
+  if (leaf.path && baseDir) {
+    try {
+      return readFileText(resolve(baseDir, leaf.path));
+    } catch {
+      return '';
+    }
+  }
+  return '';
+}
+
+export interface MergeResult {
+  state: TavernCardsState;
+  /** 未匹配旧条目的文件路径集合（用于写入时避让冲突） */
+  reservedPaths: Set<string>;
+}
+
 export function mergeWithExistingState(
   newState: TavernCardsState,
   oldState: TavernCardsState,
-): TavernCardsState {
-  // 构建旧条目查找索引：{uid → {typeName, entryName, leaf}, ...}
-  const uidIndex = new Map<number, { typeName: string; entryName: string; leaf: EntryManifestLeaf }>();
+  oldStateDir?: string,
+  newContentLookup?: Map<string, string>,
+): MergeResult {
+  // 构建旧条目查找索引
   const nameIndex = new Map<string, { typeName: string; entryName: string; leaf: EntryManifestLeaf }>();
 
   for (const [typeName, entries] of Object.entries(oldState.entryManifest)) {
     for (const [entryName, leaf] of Object.entries(entries)) {
-      if (leaf.uid !== undefined) uidIndex.set(leaf.uid, { typeName, entryName, leaf });
       nameIndex.set(entryName, { typeName, entryName, leaf });
     }
   }
@@ -60,35 +96,79 @@ export function mergeWithExistingState(
   // 新条目的 oldNames 集合（用于检测删除）
   const matchedOldNames = new Set<string>();
 
-  // 遍历新条目进行匹配
-  for (const [entryName, newLeaf] of newLeaves) {
-    const newUid = newLeaf.uid;
+  // 跟踪尚未被匹配的旧条目（用于第二轮内容匹配）
+  const unmatchedOld = new Map<string, { typeName: string; entryName: string; leaf: EntryManifestLeaf }>();
 
-    // 1. uid 匹配
-    let match = newUid !== undefined ? uidIndex.get(newUid) : undefined;
-    // 2. comment（条目名）匹配
-    if (!match) match = nameIndex.get(entryName);
+  // --- 第一轮：comment（条目名）匹配 ---
+  const matchedNewEntries = new Set<number>(); // indices into newLeaves that were matched
+
+  for (let i = 0; i < newLeaves.length; i++) {
+    const [entryName, newLeaf] = newLeaves[i];
+    const match = nameIndex.get(entryName);
 
     if (match) {
-      // 条目匹配成功：保留旧 typeName，按「角色卡侧/状态侧」分字段 merge。
-      // 角色卡侧字段来自 newLeaf（角色卡数据为本，覆盖本地配置）；
-      // 状态侧字段保留旧值（它们是 forge/用户在本地维护、不在角色卡中体现的存储结构信息）。
-      const merged: EntryManifestLeaf = {
-        ...newLeaf,
-        // --- 状态侧字段：保留旧 leaf ---
-        path: match.leaf.path,
-        contents: match.leaf.contents,
-        scope: match.leaf.scope,
-        part: match.leaf.part,
-        rephrase: match.leaf.rephrase,
-        // abstract 是必填字段：保留旧值，仅在旧值缺失时回退到新值，最终兜底空串
-        abstract: match.leaf.abstract ?? newLeaf.abstract ?? '',
-      };
-
+      const merged = mergeLeaf(newLeaf, match.leaf);
       mergedManifest[match.typeName][entryName] = merged;
       matchedOldNames.add(match.entryName);
+      matchedNewEntries.add(i);
+    }
+  }
+
+  // 收集未匹配的旧条目用于第二轮
+  for (const [name, entry] of nameIndex) {
+    if (!matchedOldNames.has(name)) {
+      unmatchedOld.set(name, entry);
+    }
+  }
+
+  // --- 第二轮：内容匹配兜底 ---
+  // 对名称匹配未命中的新条目，比较归一化后的内容以检测重命名。
+  // 预建缓存避免 N×M 次同步 IO，归一化保留语义（仅统一换行/折叠空白，不删除空白）。
+  const normalizeContent = (c: string): string =>
+    c.replace(/\r\n?/g, '\n')
+     .replace(/[ \t]+/g, ' ')
+     .replace(/\n{2,}/g, '\n')
+     .trim();
+
+  // 预读所有旧条目内容（一次性 IO，后续只做字符串比较）
+  const oldContentCache = new Map<string, string>();
+  for (const [oldName, oldEntry] of unmatchedOld) {
+    const text = getEntryText(oldEntry.leaf, oldStateDir);
+    if (text) oldContentCache.set(oldName, normalizeContent(text));
+  }
+
+  // 预归一化新条目内容（newContentLookup 已有内容，归一化后缓存）
+  const newContentCache = new Map<string, string>();
+  for (let i = 0; i < newLeaves.length; i++) {
+    if (matchedNewEntries.has(i)) continue;
+    const [entryName] = newLeaves[i];
+    const raw = newContentLookup?.get(entryName) ?? '';
+    if (raw) newContentCache.set(entryName, normalizeContent(raw));
+  }
+
+  for (let i = 0; i < newLeaves.length; i++) {
+    if (matchedNewEntries.has(i)) continue;
+
+    const [entryName, newLeaf] = newLeaves[i];
+    const newContent = newContentCache.get(entryName);
+
+    let contentMatch: { typeName: string; entryName: string; leaf: EntryManifestLeaf } | undefined;
+    for (const [oldName, oldEntry] of unmatchedOld) {
+      const oldContent = oldContentCache.get(oldName);
+      if (newContent && oldContent && newContent === oldContent) {
+        contentMatch = oldEntry;
+        unmatchedOld.delete(oldName);
+        break;
+      }
+    }
+
+    if (contentMatch) {
+      const merged = mergeLeaf(newLeaf, contentMatch.leaf);
+      mergedManifest[contentMatch.typeName][entryName] = merged;
+      matchedOldNames.add(contentMatch.entryName);
+      console.log(`  ↻ Entry renamed: "${contentMatch.entryName}" → "${entryName}" [${contentMatch.typeName}] (matched by content)`);
     } else {
-      // 新增条目 → unknown
+      // 未匹配的新条目 → unknown
       mergedManifest.unknown[entryName] = newLeaf;
     }
   }
@@ -135,15 +215,20 @@ export function mergeWithExistingState(
     zod,
   };
 
-  // 提示在新角色卡中被移除的旧条目（本地文件仍保留，用户需自行决定删除或重新注册）
+  // 收集未匹配旧条目的文件路径（本地文件保留，由调用方汇总输出）
+  const reservedPaths = new Set<string>();
   for (const [typeName, entries] of Object.entries(oldState.entryManifest)) {
     for (const [entryName, leaf] of Object.entries(entries)) {
       if (!matchedOldNames.has(entryName)) {
-        const fileInfo = leaf.path ? ` (file: ${leaf.path})` : '';
-        console.log(`  ⚠ Entry "${entryName}" [${typeName}] removed from card${fileInfo} — local file preserved`);
+        if (leaf.path) reservedPaths.add(leaf.path);
+        if (leaf.contents) {
+          for (const frag of leaf.contents) {
+            if (frag.file) reservedPaths.add(frag.file);
+          }
+        }
       }
     }
   }
 
-  return merged;
+  return { state: merged, reservedPaths };
 }

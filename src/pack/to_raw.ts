@@ -69,7 +69,7 @@ export function toSillyTavernEntry(
   const isSelective = strategy.type === 'selective';
 
   return {
-    id: leaf.uid ?? index,
+    id: index,
     keys: strategy.keys ?? [],
     secondary_keys: strategy.keys_secondary?.keys ?? [],
     comment: leaf.name,
@@ -83,7 +83,7 @@ export function toSillyTavernEntry(
     extensions: {
       position: POSITION_MAP[position.type] ?? 1,
       exclude_recursion: leaf.recursion?.prevent_incoming ?? true,
-      display_index: leaf.display_index ?? leaf.uid ?? index,
+      display_index: leaf.display_index ?? index,
       probability: leaf.probability ?? 100,
       useProbability: true,
       depth: position.depth ?? depthDefaults?.depth ?? 0,
@@ -201,7 +201,7 @@ export function toFlatWorldbookEntry(
   const isSelective = strategy.type === 'selective';
 
   return {
-    uid: leaf.uid ?? index,
+    uid: index,
     key: strategy.keys ?? [],
     keysecondary: strategy.keys_secondary?.keys ?? [],
     comment: leaf.name,

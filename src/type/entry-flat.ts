@@ -1,5 +1,4 @@
 export interface FlatWorldbookEntry {
-  uid?: number;
   key?: string[];
   keysecondary?: string[];
   comment?: string;

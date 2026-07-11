@@ -21,28 +21,8 @@ export function configureState(
       if (leaf.position && orderMap.has(entryName)) {
         leaf.position = { ...leaf.position, order: orderMap.get(entryName)! };
       }
-
-      if (force || leaf.uid === undefined) {
-        leaf.uid = allocateUid(state);
-      }
     }
   }
 
   return state;
-}
-
-let uidCounter = 0;
-
-function allocateUid(state: TavernCardsState): number {
-  const usedUids = new Set<number>();
-  for (const entries of Object.values(state.entryManifest)) {
-    for (const leaf of Object.values(entries)) {
-      if (leaf.uid !== undefined) usedUids.add(leaf.uid);
-    }
-  }
-
-  let uid = uidCounter;
-  while (usedUids.has(uid)) uid++;
-  uidCounter = uid + 1;
-  return uid;
 }

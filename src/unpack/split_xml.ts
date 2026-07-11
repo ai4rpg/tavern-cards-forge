@@ -1,5 +1,5 @@
 import { join, dirname, basename, extname } from 'node:path';
-import { sanitizeFilename } from '../util/sanitize_filename.js';
+import { sanitizeFilename, findAvailablePath } from '../util/sanitize_filename.js';
 import { isYaml, writeFileRecursive } from '../util/file_io.js';
 
 const XML_OPEN_LINE_REGEX = /^<([A-Za-z_][\w:-]*)(\s+[^<>]*)?>\s*$/;
@@ -78,26 +78,20 @@ export function buildWrappedYamlContents(
   entryName: string,
   entriesDir: string,
   outputDir: string,
+  reservedPaths: Set<string>,
   preserveContents?: Array<{ content?: string; file?: string }>,
 ): Array<{ content?: string; file?: string }> {
   // 保留旧片段中的 file 路径（仅调后缀），否则用 sanitizeFilename 生成新路径
   let relPath: string;
-  let absPath: string;
-  if (preserveContents) {
-    const oldFile = preserveContents.find(f => f.file);
-    if (oldFile?.file) {
-      const oldDir = dirname(oldFile.file);
-      const oldStem = basename(oldFile.file, extname(oldFile.file));
-      relPath = join(oldDir, `${oldStem}.yaml`);
-    } else {
-      const filename = `${sanitizeFilename(entryName)}.yaml`;
-      relPath = join(entriesDir, filename);
-    }
+  if (preserveContents?.some(f => f.file)) {
+    const oldFile = preserveContents.find(f => f.file)!;
+    const oldDir = dirname(oldFile.file!);
+    const oldStem = basename(oldFile.file!, extname(oldFile.file!));
+    relPath = join(oldDir, `${oldStem}.yaml`);
   } else {
-    const filename = `${sanitizeFilename(entryName)}.yaml`;
-    relPath = join(entriesDir, filename);
+    relPath = findAvailablePath(entriesDir, sanitizeFilename(entryName), '.yaml', reservedPaths);
   }
-  absPath = join(outputDir, relPath);
+  const absPath = join(outputDir, relPath);
 
   writeFileRecursive(absPath, analysis.yamlBody);
 

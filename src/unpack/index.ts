@@ -21,7 +21,7 @@ const DIR_GREETINGS = '开场白';
 
 export async function runUnpack(
   project: string,
-  opts: { file?: string; output?: string; state?: string; raw?: boolean; fresh?: boolean },
+  opts: { file?: string; output?: string; state?: string; json?: boolean; fresh?: boolean },
 ) {
   const { artifactPath, statePath, projectFound } = resolveProject(project, { artifact: opts.file });
   if (!projectFound) {
@@ -63,6 +63,17 @@ export async function runUnpack(
   outputDir = resolve(cwd, outputDir);
 
   const fileType = detectFileType(filePath);
+
+  if (opts.json) {
+    if (fileType !== 'png') {
+      throw new Error('--json only supports PNG input. JSON files are already in text form.');
+    }
+    const { data } = extractFromPng(filePath);
+    const outPath = opts.output ?? resolve(cwd, basename(filePath, '.png') + '.json');
+    writeJson(outPath, data);
+    console.log(`JSON output → ${outPath}`);
+    return;
+  }
 
   let rawEntries: SillyTavernEntry[];
   let form: 'charactercard' | 'worldbook';
@@ -142,12 +153,6 @@ export async function runUnpack(
         ? data.entries
         : Object.values(data.entries ?? {}) as SillyTavernEntry[];
     }
-  }
-
-  if (opts.raw) {
-    writeJson(opts.output ?? resolve(cwd, 'raw.json'), rawEntries);
-    console.log(`Raw output → ${opts.output ?? 'raw.json'}`);
-    return;
   }
 
   mkdirSync(outputDir, { recursive: true });

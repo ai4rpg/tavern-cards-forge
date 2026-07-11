@@ -55,7 +55,10 @@ export function writePng(image: Buffer, jsonData: string): Buffer {
     }
   }
 
-  const base64V2 = Buffer.from(jsonData, 'utf-8').toString('base64');
+  const v2Data = JSON.parse(jsonData);
+  v2Data.spec = 'chara_card_v2';
+  v2Data.spec_version = '2.0';
+  const base64V2 = Buffer.from(JSON.stringify(v2Data), 'utf-8').toString('base64');
   chunks.splice(-1, 0, PNGtext.encode('chara', base64V2));
 
   try {

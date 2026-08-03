@@ -286,8 +286,19 @@ MVU Zod 方案中，`schema.ts` 是变量 Schema 的单一数据源，Zod 脚本
 1. 检测开场白内容中的 `<UpdateVariable><initvar>` 块
 2. 将 YAML 内容写入 `开场白/initvar/{index}.yaml`
 3. 移除块及其紧邻的尾部空行（若存在），尽量保留原始排版，不会误伤文档其他位置的空行
-4. 清理后的内容写入 `开场白/{index}.txt`
-5. 填充 `state.initvar_overrides["开场白/{index}.txt"] = "开场白/initvar/{index}.yaml"`
+4. 清理后的内容写入 `开场白/{index}` 文件，后缀按 unpack 分流规则选择（`.txt` 或 `.md`，见下节）
+5. 填充 `state.initvar_overrides["开场白/{index}.{ext}"] = "开场白/initvar/{index}.yaml"`，key 与文件实际后缀一致
+
+### 状态栏占位符自动追加
+
+MVU 项目打包时，`.txt` 开场白末尾自动追加 `<StatusPlaceHolderImpl/>` 状态栏占位符（`appendStatusPlaceholderIfMissing`，见 `src/util/mvu_schema.ts`），供 `状态栏界面` 正则脚本在运行时替换为 HTML 界面。
+
+- **触发条件**：`state.mvu === true` 且开场白条目为 `.txt` 文件路径（大小写不敏感）
+- **行为**：`trimEnd` 后以 `\n\n` 分隔追加；幂等——内容已含占位符时原样返回，不重复追加、不移动用户手动放置的位置；只作用于打包产物，不写源文件
+- **豁免**：`.md`/`.html`/`.json`/`.yaml` 等其他后缀文件与内联文本不追加
+- **执行时机**：initvar 嵌入（见上节）之后、拼接产物的最末尾；所有 `first_messages`（含 alternate_greetings）统一按此规则处理
+
+**unpack 方向**（`src/unpack/index.ts` 开场白循环）：解包时 MVU 开场白按内容分流后缀——清理后的内容含 `<StatusPlaceHolderImpl/>` → `.txt`，不含 → `.md`；非 MVU 项目维持 `.txt`。分流规则与 pack 侧追加规则配套：`.txt` 携带占位符，`.md` 在 pack 时不追加，保证 unpack→pack 往返后 `first_mes` 与原始卡逐字一致。`initvar_overrides` 的 key 即文件的 relPath，pack 侧 `initvar_overrides[greetingKey]` 原样匹配。
 
 ## 编码检测
 

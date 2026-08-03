@@ -13,7 +13,7 @@ import type { SillyTavernEntry, FlatWorldbookEntry } from '../type/sillytavern.j
 import { resolveProject, ProjectNotFoundError } from '../cli/settings.js';
 import { stripCharaChunks } from '../pack/png_encode.js';
 import { detectMvu } from '../util/detect_mvu.js';
-import { isMvuZodScript, extractInitvarOverrideFromGreeting } from '../util/mvu_schema.js';
+import { isMvuZodScript, extractInitvarOverrideFromGreeting, STATUS_PLACEHOLDER } from '../util/mvu_schema.js';
 
 const DIR_REGEX = '正则';
 const DIR_SCRIPTS = '脚本';
@@ -258,6 +258,7 @@ export async function runUnpack(
 
     for (let gi = 0; gi < state.first_messages.length; gi++) {
       let content = state.first_messages[gi];
+      let overrideRelPath: string | undefined;
 
       // MVU: 提取 <UpdateVariable><initvar> 块
       // 对所有开场白检测（包括 gi === 0），只要有块就提取
@@ -265,22 +266,26 @@ export async function runUnpack(
         const extracted = extractInitvarOverrideFromGreeting(content);
         if (extracted) {
           const overrideFilename = `initvar/${gi}.yaml`;
-          const overrideRelPath = join(DIR_GREETINGS, overrideFilename);
+          overrideRelPath = join(DIR_GREETINGS, overrideFilename);
           const overrideAbsPath = join(outputDir, overrideRelPath);
 
           mkdirSync(dirname(overrideAbsPath), { recursive: true });
           writeFileRecursive(overrideAbsPath, extracted.initvarYaml);
-
-          const greetingRelPath = join(DIR_GREETINGS, `${gi}.txt`);
-          initvarOverrides[greetingRelPath] = overrideRelPath;
 
           content = extracted.cleanedContent;
           console.log(`  Extracted initvar_override → ${overrideRelPath}`);
         }
       }
 
-      const filename = `${gi}.txt`;
+      // MVU 开场白按内容分流后缀：内容已含占位符 → .txt（pack 幂等跳过追加）；
+      // 不含占位符 → .md（pack 不追加，保持 unpack → pack 往返一致）；非 MVU 维持 .txt。
+      // 判断基于提取 initvar 之后的 content（占位符在 initvar 块之外，cleanedContent 保留它）。
+      const ext = state.mvu && !content.includes(STATUS_PLACEHOLDER) ? '.md' : '.txt';
+      const filename = `${gi}${ext}`;
       const relPath = join(DIR_GREETINGS, filename);
+      if (overrideRelPath) {
+        initvarOverrides[relPath] = overrideRelPath;
+      }
       const absPath = join(outputDir, relPath);
 
       writeFileRecursive(absPath, content);

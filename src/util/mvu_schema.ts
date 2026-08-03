@@ -375,6 +375,18 @@ export function embedInitvarOverrideInGreeting(content: string, initvarYaml: str
   return `${cleaned}\n\n<UpdateVariable>\n<initvar>\n${initvarYaml}\n</initvar>\n</UpdateVariable>`;
 }
 
+/** 状态栏占位符标签，与 tavern-cards/assets/mvu-patch.json 中两条正则脚本（对AI隐藏状态栏 / 状态栏界面）的 findRegex 完全一致 */
+export const STATUS_PLACEHOLDER = '<StatusPlaceHolderImpl/>';
+
+/**
+ * 在开场白内容末尾追加状态栏占位符（幂等）
+ * 内容已含占位符时原样返回——不重复追加，也不移动用户手动放置的位置
+ */
+export function appendStatusPlaceholderIfMissing(content: string): string {
+  if (content.includes(STATUS_PLACEHOLDER)) return content;
+  return `${content.trimEnd()}\n\n${STATUS_PLACEHOLDER}`;
+}
+
 /**
  * 从 entryManifest 中定位 [InitVar] 条目对应的 YAML 文件绝对路径
  * @returns 绝对路径；未找到 [InitVar] 条目或条目无 path 时返回 null

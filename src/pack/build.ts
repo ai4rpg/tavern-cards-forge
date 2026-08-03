@@ -1,12 +1,12 @@
 import { buildSillyTavernCharacter, buildFlatWorldbook } from './to_raw.js';
 import { resolveFiles } from './resolve_files.js';
 import { writePng } from './png_encode.js';
-import { resolve } from 'node:path';
+import { resolve, extname } from 'node:path';
 import { readFileSync } from 'node:fs';
 import type { TavernCardsState } from '../type/state.js';
 import type { CardrcConfig } from '../type/settings.js';
 import { readFileText } from '../util/file_io.js';
-import { embedInitvarOverrideInGreeting, prepareZodSync, buildZodScriptEntry, isFilePathGreeting } from '../util/mvu_schema.js';
+import { embedInitvarOverrideInGreeting, prepareZodSync, buildZodScriptEntry, isFilePathGreeting, appendStatusPlaceholderIfMissing } from '../util/mvu_schema.js';
 
 function resolveInlineOrFile(value: string, stateDir: string): string {
   if (isFilePathGreeting(value)) {
@@ -28,23 +28,24 @@ function resolveFilePath(value: string, stateDir: string): string {
 function resolvePackState(state: TavernCardsState, stateDir: string, zodSubject?: string): TavernCardsState {
   const packState = { ...state };
 
-  // --- first_messages: 解析文件 + MVU initvar_override 嵌入 ---
+  // --- first_messages: 解析文件 + MVU initvar_override 嵌入 + 状态栏占位符追加 ---
   packState.first_messages = state.first_messages.map((item, index) => {
-    const resolved = resolveInlineOrFile(item, stateDir);
+    const greetingKey = state.first_messages[index]; // 原始值，如 "开场白/1.txt"
+    let resolved = resolveInlineOrFile(item, stateDir);
 
-    // MVU: 嵌入 initvar_override
-    if (state.initvar_overrides) {
-      const greetingKey = state.first_messages[index]; // 原始值，如 "开场白/1.txt"
-      // 只有当 greetingKey 是文件路径（非内联文本）时才查找 override
-      if (!isFilePathGreeting(greetingKey)) {
-        return resolved;
-      }
+    // MVU: 嵌入 initvar_override（仅文件路径条目）
+    if (state.initvar_overrides && isFilePathGreeting(greetingKey)) {
       const overridePath = state.initvar_overrides[greetingKey];
       if (overridePath) {
         const overrideAbsPath = resolve(stateDir, overridePath);
         const initvarYaml = readFileText(overrideAbsPath);
-        return embedInitvarOverrideInGreeting(resolved, initvarYaml);
+        resolved = embedInitvarOverrideInGreeting(resolved, initvarYaml);
       }
+    }
+
+    // MVU: 向 .txt 开场白末尾追加状态栏占位符（幂等，在 initvar 嵌入之后执行，落在最末尾）
+    if (state.mvu && isFilePathGreeting(greetingKey) && extname(greetingKey).toLowerCase() === '.txt') {
+      resolved = appendStatusPlaceholderIfMissing(resolved);
     }
 
     return resolved;

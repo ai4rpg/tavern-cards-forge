@@ -92,9 +92,9 @@ tavern-cards-forge pack <project> [选项]
 8. 将 EntryManifestLeaf 转换为 SillyTavern 原始格式
 9. 根据 `form` 字段和 `avatar` 字段选择输出格式：
    - `form=worldbook` → 输出 JSON（扁平格式独立世界书）
-   - `form=charactercard` 且 `avatar` 非空 → 输出 PNG（嵌入角色卡元数据 + 标准格式世界书）
+   - `form=charactercard` 且 `avatar` 非空 → 输出 PNG（嵌入角色卡元数据 + 标准格式世界书）；若 avatar 内容不是合法 PNG，回退输出 JSON 并警告
    - `form=charactercard` 且 `avatar` 为空 → 输出 JSON（标准格式角色卡）
-10. 输出路径优先级：`--output` > 项目 `artifact` > state 同目录下 `{name}.json` / `{name}.png`
+10. 输出路径优先级：`--output` > 项目 `artifact` > state 同目录下 `{name}.json` / `{name}.png`；路径后缀与实际输出格式不一致时（如 `artifact` 配置为 `.png` 而实际输出 JSON），自动替换为正确后缀并警告，避免 JSON 内容被写入 `.png` 后缀文件导致误导入酒馆失败
 
 **示例：**
 

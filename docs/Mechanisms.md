@@ -199,6 +199,11 @@ pack 时根据 `form` 和 `avatar` 字段选择输出格式：
 | `form=charactercard` + `avatar` 非空 | PNG（嵌入 chara/ccv3 tEXt chunk） |
 | `form=charactercard` + `avatar` 为空 | 标准格式角色卡 JSON |
 
+**回退与后缀修正**：
+
+- `avatar` 非空但内容无法解析为 PNG 时，回退输出标准格式角色卡 JSON 并警告
+- 产物路径后缀与实际输出格式不一致时（如 `artifact` 配置为 `.png` 而实际输出 JSON），自动替换为正确后缀并警告，避免 JSON 内容写入 `.png` 后缀文件导致误导入酒馆失败
+
 ## MVU 支持
 
 工具支持两种 MVU 方案：**MVU**（基于 MagVarUpdate 脚本）和 **MVU Zod**（基于 MagVarUpdate + Zod schema 变量校验，需同时使用两个脚本）。两者共享同一 `mvu` 字段和 [InitVar] 条目约定；initvar_override 机制对两种方案均有效。

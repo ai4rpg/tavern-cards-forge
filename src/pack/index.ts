@@ -1,4 +1,4 @@
-import { dirname, resolve } from 'node:path';
+import { dirname, resolve, extname } from 'node:path';
 import { existsSync } from 'node:fs';
 import { detailedParse } from '../util/prettified_parse.js';
 import { TavernCardsState } from '../type/state.js';
@@ -16,6 +16,30 @@ import {
   prepareZodSync,
   loadMvuSchema,
 } from '../util/mvu_schema.js';
+
+/** 修正 artifact 后缀，使其与打包格式一致；output 未指定时按格式推导默认路径。fixed 表示后缀曾被修正。 */
+function normalizeArtifact(output: string | undefined, stateDir: string, name: string, format: 'png' | 'json'): { path: string; fixed: boolean } {
+  const ext = format === 'png' ? '.png' : '.json';
+  const path = output ?? resolve(stateDir, `${name}${ext}`);
+  const current = extname(path).toLowerCase();
+  if (current === ext) return { path, fixed: false };
+  return { path: path.replace(/\.(png|json)$/i, '') + ext, fixed: true };
+}
+
+/** 三处打包分支共用：修正后缀并告警，落盘，返回实际路径。 */
+function writeArtifact(
+  output: string | undefined,
+  stateDir: string,
+  name: string,
+  format: 'png' | 'json',
+  content: string | Buffer,
+): string {
+  const { path: outPath, fixed } = normalizeArtifact(output, stateDir, name, format);
+  if (fixed) console.warn(`⚠ Output format is ${format.toUpperCase()}, corrected suffix → "${outPath}"`);
+  mkdirSync(dirname(outPath), { recursive: true });
+  writeFileSync(outPath, content);
+  return outPath;
+}
 
 export async function runPack(project: string, opts: { state?: string; output?: string }) {
   const { cardrc, statePath, artifactPath: defaultArtifact, projectFound } = resolveProject(project, { state: opts.state, artifact: opts.output });
@@ -96,52 +120,68 @@ export async function runPack(project: string, opts: { state?: string; output?: 
       schemaInstance = await loadMvuSchema(schemaAbsPath, { schemaContent: zodSync?.schemaContent });
     }
 
+    // 3/4. 校验默认 initvar（世界书条目）与 initvar_overrides（开场白尾随代码块）并汇总计数，避免逐项成功汇报淹没输出
+    let defaultChecked = false;
+    let overrideCount = 0;
     const result = await validateMvuInitvar(
       stateDir, state.entryManifest,
       undefined,
       schemaInstance ? { schemaPath: schemaAbsPath!, schema: schemaInstance } : undefined,
     );
-    if (result) {
-      console.log(`✓ MVU validation passed: ${result.initvarPath} matches schema.ts`);
-    } else {
-      console.log('ℹ MVU project but schema.ts not found, skipping variable validation');
-    }
+    if (result) defaultChecked = true;
 
-    // 4. 校验 initvar_overrides 中所有 override 文件（复用同一 Schema 实例）
+    // 复用同一 Schema 实例
     if (state.initvar_overrides) {
       for (const [, overridePath] of Object.entries(state.initvar_overrides)) {
         const overrideResult = await validateMvuInitvar(
           stateDir, state.entryManifest, overridePath,
           schemaInstance ? { schemaPath: schemaAbsPath!, schema: schemaInstance } : undefined,
         );
-        if (overrideResult) {
-          console.log(`✓ MVU validation passed: ${overridePath}`);
-        }
+        if (overrideResult) overrideCount++;
       }
+    }
+
+    const parts: string[] = [];
+    if (defaultChecked) parts.push('default initvar');
+    if (overrideCount) parts.push(`${overrideCount} initvar override${overrideCount > 1 ? 's' : ''}`);
+    if (parts.length) {
+      console.log(`✓ MVU initvar validated: ${parts.join(', ')} matches schema.ts`);
+    } else {
+      console.log('ℹ MVU project but schema.ts not found, skipping variable validation');
     }
   }
 
   if (state.form === 'worldbook') {
     const json = buildWorldbookJson(state, stateDir, cardrc.depth_defaults);
-    output ??= resolve(stateDir, `${state.worldbookName}.json`);
-    mkdirSync(dirname(output), { recursive: true });
-    writeFileSync(output, json);
+    output = writeArtifact(output, stateDir, state.worldbookName, 'json', json);
     console.log(`Packed worldbook → ${output}`);
   } else {
     const hasAvatar = state.avatar && state.avatar.trim() !== '';
     const zodSubject = zodSync?.zodSubject;
+    // --output 后缀决定 avatar 缺失是否需告警：.png 表达明确要 PNG，缺/非法都属异常
+    const wantPng = output ? extname(output).toLowerCase() === '.png' : false;
 
+    let png: Buffer | undefined;
+    let fallbackReason: string | null = null;
     if (hasAvatar) {
-      const png = buildCharacterPng(state, stateDir, cardrc.depth_defaults, zodSubject);
-      output ??= resolve(stateDir, `${state.projectName}.png`);
-      mkdirSync(dirname(output), { recursive: true });
-      writeFileSync(output, png);
+      try {
+        png = buildCharacterPng(state, stateDir, cardrc.depth_defaults, zodSubject);
+      } catch (err) {
+        fallbackReason = `Avatar "${state.avatar}" is invalid (${(err as Error).message})`;
+      }
+    } else if (wantPng) {
+      fallbackReason = 'Avatar is missing but PNG output was requested';
+    }
+
+    if (png) {
+      output = writeArtifact(output, stateDir, state.projectName, 'png', png);
       console.log(`Packed character (PNG) → ${output}`);
     } else {
+      if (fallbackReason) {
+        console.warn(`⚠ ${fallbackReason}, falling back to JSON output`);
+      }
       const json = buildCharacterJson(state, stateDir, cardrc.depth_defaults, zodSubject);
-      output ??= resolve(stateDir, `${state.projectName}.json`);
-      mkdirSync(dirname(output), { recursive: true });
-      writeFileSync(output, json);
+      output = writeArtifact(output, stateDir, state.projectName, 'json', json);
       console.log(`Packed character (JSON) → ${output}`);
     }
   }

@@ -351,6 +351,11 @@ MVU Zod 脚本元数据，以 `zod` 字段存储在 `TavernCardsState` 顶层。
 - `form = "charactercard"` 且 `avatar` 非空 → 角色 PNG 卡（标准格式）
 - `form = "charactercard"` 且 `avatar` 为空 → 角色 JSON 卡（标准格式）
 
+**回退与路径修正**：
+
+- `avatar` 非空但文件内容不是合法 PNG（如损坏文件或非 PNG 图片）时，PNG 打包失败，回退为角色 JSON 卡并输出警告
+- 产物路径后缀与实际输出格式不一致时（如 `artifact` 配置为 `.png` 而实际输出 JSON），自动替换为正确后缀并输出警告，避免 JSON 内容被写入 `.png` 后缀文件导致误导入酒馆失败
+
 **格式差异说明**：
 
 - **角色卡（PNG/JSON）**：使用 SillyTavern 标准格式，条目字段嵌套在 `extensions` 对象中，包含角色元数据（description、first_messages 等）
@@ -409,7 +414,7 @@ MVU Zod 脚本元数据，以 `zod` 字段存储在 `TavernCardsState` 顶层。
 
 **pack** 时根据 `form` 和 `avatar` 字段选择输出格式：
 
-- `form = "charactercard"` 且 `avatar` 非空 → PNG（SillyTavern 标准格式）
+- `form = "charactercard"` 且 `avatar` 非空 → PNG（SillyTavern 标准格式）；若 avatar 内容不是合法 PNG，回退 JSON（标准格式）并警告
 - `form = "charactercard"` 且 `avatar` 为空 → JSON（SillyTavern 标准格式）
 - `form = "worldbook"` → JSON（扁平格式）
 

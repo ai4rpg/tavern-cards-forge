@@ -84,7 +84,7 @@ tavern-cards-forge pack <project> [选项]
 4. **MVU 特征检测**：若 `state.mvu === true`，验证项目中存在 MVU 特征（详见 [机制原理](Mechanisms.md#mvu-检测)）
 5. **MVU 校验**（`state.mvu === true` 时依次执行）：
    - **[InitVar] 条目禁用校验**：所有以 `[InitVar]` 开头的条目必须显式设置 `enabled: false`
-   - **Zod 脚本内容校验**（`state.zod` 存在时）：从 `state.zod.schemaPath` 读取 `schema.ts` 并重建 Zod 脚本内容，校验是否含 `export type` 等运行时失效模式（详见 [机制原理](Mechanisms.md#pack-时-mvu-校验)）
+   - **Zod 脚本内容校验**（`state.zod` 存在时）：从 `state.zod.schemaPath` 读取 `schema.ts` 并重建 Zod 脚本内容，校验是否含 `export type` 等运行时失效模式、同一对象内重复字段键（详见 [机制原理](Mechanisms.md#pack-时-mvu-校验)）
    - **initvar 一致性校验**（`state.zod` 存在且 `schema.ts` 文件存在时）：加载 `schema.ts` 导出的 Zod Schema 实例（单次加载，复用校验所有 initvar 文件），校验 `[InitVar]` 条目 YAML 及 `initvar_overrides` 中所有文件是否匹配
    - `state.mvu === true` 但 `state.zod` 缺失时输出警告，跳过 Zod 相关校验
 6. 解析所有条目，加载 `path` 或 `contents` 引用的内容文件；同时加载 `replace_file` / `script_file` 引用的文件内容。**tavern_helper.scripts** 中 Zod 脚本由 `state.zod` 从 `schema.ts` 重建（详见 [机制原理](Mechanisms.md#zod-脚本同步)）；普通脚本仅解析 `script_file` → `content`
@@ -258,7 +258,7 @@ tavern-cards-forge validate-mvu <project> [选项]
 3. 根据 `state.zod.schemaPath` 定位 `schema.ts`
 4. 用 jiti 加载 `schema.ts`，注入全局 `z`（Zod v4）和 `_`（lodash）
    - 单文件产物已内置 jiti、Zod 和 lodash；`schema.ts` 直接使用全局 `z` / `_`，**禁止任何 `import` 语句**（含 `import { z } from 'zod'`、`import _ from 'lodash'`、CDN URL import、相对路径 import）——详见下一步预检
-5. 读取 `schema.ts` 后先预检：若含任何 `import` 语句，立即报错退出（与 `pack` 中的 schema.ts 预检一致——`z` / `_` 已是全局，且 forge 不会打包额外 npm 包）
+5. 读取 `schema.ts` 后先预检：若含任何 `import` 语句，立即报错退出（与 `pack` 中的 schema.ts 预检一致——`z` / `_` 已是全局，且 forge 不会打包额外 npm 包）；随后检测重复字段键（同一 `z.object({...})` 内属性键重复即报错，含嵌套对象与 prefault 默认值对象）
 6. 解析指定的 initvar YAML 文件
 7. 用 Schema 校验 YAML 数据
 8. 校验通过打印成功信息，失败打印详细错误路径和原因

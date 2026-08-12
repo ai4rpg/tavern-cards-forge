@@ -6,6 +6,7 @@ import * as _ from 'lodash';
 import * as yaml from 'yaml';
 import { readFileText } from './file_io.js';
 import { detailedParse } from './prettified_parse.js';
+import { detectDuplicateSchemaKeys, formatDuplicateSchemaKeyIssues } from './schema_dup_keys.js';
 import type { EntryManifest, ZodDescriptor } from '../type/state.js';
 import type { ZodType } from 'zod';
 
@@ -239,6 +240,8 @@ export function prepareZodSync(stateDir: string, zod: ZodDescriptor): { schemaCo
   const schemaContent = readFileText(absPath);
   const schemaImportErrors = checkSchemaTsContent(schemaContent);
   if (schemaImportErrors.length > 0) throw new Error(schemaImportErrors.join('\n'));
+  const dupKeyIssues = detectDuplicateSchemaKeys(schemaContent);
+  if (dupKeyIssues.length > 0) throw new Error(formatDuplicateSchemaKeyIssues(dupKeyIssues, absPath));
   const zodSubject = buildZodScriptFromSchemaTs(schemaContent, zod.importUrl);
   return { schemaContent, zodSubject };
 }
@@ -421,6 +424,10 @@ export async function loadMvuSchema(
   const schemaImportErrors = checkSchemaTsContent(schemaContent);
   if (schemaImportErrors.length > 0) {
     throw new Error(schemaImportErrors.join('\n'));
+  }
+  const dupKeyIssues = detectDuplicateSchemaKeys(schemaContent);
+  if (dupKeyIssues.length > 0) {
+    throw new Error(formatDuplicateSchemaKeyIssues(dupKeyIssues, schemaPath));
   }
 
   const jiti = createJiti(import.meta.url, { interopDefault: true });

@@ -227,17 +227,18 @@ pack 时根据 `form` 和 `avatar` 字段选择输出格式：
 
 1. **MVU 特征检测**（见上节） — 必须满足三个检测条件
 2. **[InitVar] 条目禁用校验** — 所有以 `[InitVar]` 开头的条目必须显式设置 `enabled: false`（SillyTavern 默认启用，运行时不应激活这些仅用于变量定义的条目）
-3. **Zod 脚本内容校验**（`state.zod` 存在时）— [`prepareZodSync`](../src/util/mvu_schema.ts) 一次性完成「读 `schema.ts` + 预检 import + 生成 Zod 脚本内容」，供后续 build 阶段复用：
+3. **Zod 脚本内容校验**（`state.zod` 存在时）— [`prepareZodSync`](../src/util/mvu_schema.ts) 一次性完成「读 `schema.ts` + 预检 import + 重复字段键检测 + 生成 Zod 脚本内容」，供后续 build 阶段复用：
    - `schema.ts` 不得包含任何 `import` 语句。`z`（Zod v4）与 `_`（lodash）已由 MVU 运行时作为全局注入，无需也不能 `import`；forge **不打包**额外 npm 包，因此裸模块 / 相对路径 / 绝对路径的 `import` 都会在浏览器解析阶段失败
    - 命中即整体终止并打印违法 import 列表，提示用户删除（**不要** `npm install`）
+   - **重复字段键检测**（源码文本层，[`detectDuplicateSchemaKeys`](../src/util/schema_dup_keys.ts)）：同一 `z.object({...})` 内属性键重复即整体终止——重复键在运行时被 JS 静默覆盖（后者覆盖前者，Zod 只保留最后一个），运行时校验检不出，只有前端 vue-tsc（TS1117）会报，故在源码层提前暴露；输出键名 + 对象路径 + 全部出现行号。覆盖嵌套对象与 `.prefault({...})` / `.default({...})` 默认值对象
    - 通过预检后用 [`buildZodScriptFromSchemaTs`](../src/util/mvu_schema.ts) 生成 Zod 脚本内容，再由 [`validateZodScriptContent`](../src/util/mvu_schema.ts) 校验是否含 `export type` 等运行时失效模式（import 相关检查已由上游预检覆盖）
    - `state.zod` 缺失时输出警告，跳过 Zod 相关校验
 4. **initvar 一致性校验**（`state.zod` 存在且 `schema.ts` 文件存在时）— [`loadMvuSchema`](../src/util/mvu_schema.ts) 单次加载 `schema.ts` 导出的 Zod Schema 实例（避免多次 jiti 初始化），后续所有 initvar 文件复用同一实例：
    - 校验 `entryManifest` 中 `[InitVar]` 条目的 YAML 内容是否匹配 `schema.ts` 定义的 Zod Schema
    - 校验 `initvar_overrides` 中所有 override YAML 文件同样匹配该 Schema
-   - 内部先执行步骤 3 的 schema.ts import 预检；pack 流程已读好 `schema.ts` 内容时会经 `options.schemaContent` 传入，避免对每个 override 重复读盘
+   - 内部先执行步骤 3 的 schema.ts import 预检与重复字段键检测；pack 流程已读好 `schema.ts` 内容时会经 `options.schemaContent` 传入，避免对每个 override 重复读盘
 
-校验逻辑分布在 `src/util/detect_mvu.ts`（MVU 检测、禁用校验）和 `src/util/mvu_schema.ts`（Zod 脚本校验、initvar 一致性校验）。
+校验逻辑分布在 `src/util/detect_mvu.ts`（MVU 检测、禁用校验）、`src/util/mvu_schema.ts`（Zod 脚本校验、initvar 一致性校验）和 `src/util/schema_dup_keys.ts`（重复字段键检测）。
 
 ### Zod 脚本同步
 

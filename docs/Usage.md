@@ -11,40 +11,25 @@
   - [validate-mvu](#validate-mvu)
   - [query](#query)
   - [patch](#patch)
+  - [export](#export)
+  - [split](#split)
 - [典型工作流](#典型工作流)
 
 ## 安装与构建
 
-### 直接运行单文件产物
-
-发布包中的 `dist/index.mjs` 已打包运行时依赖，用户无需在下载目录执行 `npm install`；只要本机有 Node.js 20+ 即可运行。
+**直接运行单文件产物**：发布包中的 `dist/index.mjs` 已打包运行时依赖，只要本机有 Node.js 20+ 即可运行，无需 `npm install`。
 
 ```bash
 node dist/index.mjs --help
+chmod +x dist/index.mjs && ./dist/index.mjs --help   # 或添加可执行权限后直接调用
 ```
 
-如需直接执行文件本身，确保它有可执行权限：
-
-```bash
-chmod +x dist/index.mjs
-./dist/index.mjs --help
-```
-
-### 从源码构建
-
-开发或重新构建时仍需安装依赖：
+**从源码构建**（开发或重新构建）：
 
 ```bash
 npm install
 npm run build          # tsup → dist/index.mjs（单文件 bundled CLI）
-node dist/index.mjs --help
-```
-
-也可在源码目录全局链接：
-
-```bash
-npm link
-tavern-cards-forge --help
+npm link && tavern-cards-forge --help   # 或全局链接后用命令名调用
 ```
 
 ## 命令
@@ -70,31 +55,15 @@ tavern-cards-forge pack <project> [选项]
 **行为：**
 
 1. 读取 `state_file` 指向的 `tavern-cards-state.json`
-2. **验证所有文件路径字段**：检查以下字段引用的文件是否存在
-   - `entryManifest.{type}.{name}.path` / `.contents[].file`
-   - `regex_scripts.{name}.replace_file`
-   - `extensions.tavern_helper.scripts.{name}.script_file`
-   - `avatar`
-   - `first_messages[]`
-   - `initvar_overrides` 中所有值
-   - `zod.schemaPath`
-
-   若有缺失文件，列出清单并退出
-3. **编码检测**：读取每个内容文件时自动检测编码，非 UTF-8 文件报错退出（详见 [机制原理](Mechanisms.md#编码检测)）
-4. **MVU 特征检测**：若 `state.mvu === true`，验证项目中存在 MVU 特征（详见 [机制原理](Mechanisms.md#mvu-检测)）
-5. **MVU 校验**（`state.mvu === true` 时依次执行）：
-   - **[InitVar] 条目禁用校验**：所有以 `[InitVar]` 开头的条目必须显式设置 `enabled: false`
-   - **Zod 脚本内容校验**（`state.zod` 存在时）：从 `state.zod.schemaPath` 读取 `schema.ts` 并重建 Zod 脚本内容，校验是否含 `export type` 等运行时失效模式、同一对象内重复字段键（详见 [机制原理](Mechanisms.md#pack-时-mvu-校验)）
-   - **initvar 一致性校验**（`state.zod` 存在且 `schema.ts` 文件存在时）：加载 `schema.ts` 导出的 Zod Schema 实例（单次加载，复用校验所有 initvar 文件），校验 `[InitVar]` 条目 YAML 及 `initvar_overrides` 中所有文件是否匹配
-   - `state.mvu === true` 但 `state.zod` 缺失时输出警告，跳过 Zod 相关校验
-6. 解析所有条目，加载 `path` 或 `contents` 引用的内容文件；同时加载 `replace_file` / `script_file` 引用的文件内容。**tavern_helper.scripts** 中 Zod 脚本由 `state.zod` 从 `schema.ts` 重建（详见 [机制原理](Mechanisms.md#zod-脚本同步)）；普通脚本仅解析 `script_file` → `content`
-7. **initvar_override 嵌入**：若 `state.initvar_overrides` 存在，将对应开场白的 `<UpdateVariable><initvar>` 块更新为 override YAML 内容
-8. 将 EntryManifestLeaf 转换为 SillyTavern 原始格式
-9. 根据 `form` 字段和 `avatar` 字段选择输出格式：
-   - `form=worldbook` → 输出 JSON（扁平格式独立世界书）
-   - `form=charactercard` 且 `avatar` 非空 → 输出 PNG（嵌入角色卡元数据 + 标准格式世界书）；若 avatar 内容不是合法 PNG，回退输出 JSON 并警告
-   - `form=charactercard` 且 `avatar` 为空 → 输出 JSON（标准格式角色卡）
-10. 输出路径优先级：`--output` > 项目 `artifact` > state 同目录下 `{name}.json` / `{name}.png`；路径后缀与实际输出格式不一致时（如 `artifact` 配置为 `.png` 而实际输出 JSON），自动替换为正确后缀并警告，避免 JSON 内容被写入 `.png` 后缀文件导致误导入酒馆失败
+2. **验证所有文件路径字段**存在（`entryManifest` 的 `path`/`contents[].file`、`regex_scripts.replace_file`、`tavern_helper.scripts.script_file`、`avatar`、`first_messages[]`、`initvar_overrides` 值、`zod.schemaPath`）；缺失则列出清单退出
+3. 读取所有内容文件并检测编码（非 UTF-8 报错，详见 [机制原理](Mechanisms.md#编码检测)）
+4. MVU 项目（`state.mvu === true`）额外执行 [InitVar] 条目禁用校验、Zod 脚本重建与内容校验、initvar YAML 与 `schema.ts` 的一致性校验（详见 [机制原理](Mechanisms.md#pack-时-mvu-校验)）；`state.zod` 缺失时输出警告并跳过 Zod 校验
+5. 将 EntryManifestLeaf 转换为 SillyTavern 原始格式；`initvar_overrides` 存在时嵌入开场白的 `<UpdateVariable><initvar>` 块
+6. 根据 `form` + `avatar` 选择输出格式：
+   - `form=worldbook` → 独立世界书 JSON（扁平格式）
+   - `form=charactercard` + `avatar` 非空 → PNG（avatar 非合法 PNG 时回退 JSON 并警告）
+   - `form=charactercard` + `avatar` 为空 → 角色 JSON 卡
+7. 输出路径优先级：`--output` > 项目 `artifact` > state 同目录的 `{name}.json`/`.png`；后缀与实际格式不符时自动修正并警告
 
 **示例：**
 
@@ -109,9 +78,6 @@ tavern-cards-forge pack <project> --output ./dist/MyCharacter.png
 tavern-cards-forge pack temp \
   --state ./cards/MyCharacter/tavern-cards-state.json \
   --output ./dist/MyCharacter.png
-
-# 仅提供 --state 而没有 --output 会失败
-tavern-cards-forge pack temp --state ./cards/MyCharacter/tavern-cards-state.json
 ```
 
 ### unpack
@@ -132,26 +98,12 @@ tavern-cards-forge unpack <project> [选项]
 
 **行为：**
 
-1. 读取 `artifact` 指向的 PNG/JSON 文件
-2. 自动识别格式类型：
-   - PNG 文件 → 角色卡格式
-   - JSON 文件 → 检测扁平格式或 SillyTavern 标准格式
-3. 提取所有条目，转换为扁平的 EntryManifestLeaf 结构
-4. **MVU 自动检测**：满足条件时自动设置 `mvu: true`（详见 [机制原理](Mechanisms.md#mvu-检测)）
-5. **Zod 脚本检测与提取**：从 `tavern_helper.scripts` 中检测 MVU Zod 脚本，提取元数据写入 `state.zod`，并从 scripts 中移除该 Zod 脚本（不再写出为 `脚本/{name}.txt`）。若脚本为压缩/编译产物则仅记录警告（详见 [机制原理](Mechanisms.md#zod-脚本同步)）
-6. **merge 模式**（默认，即未指定 `--fresh` 时）：若 `--state` 指向的 state.json 或项目配置的 state 文件存在，将已有 state 的分类/路径等信息合并到新解包的 state 中。`--output` 未指定时从 `--state` 路径推导（取其所在目录）
-   - **条目匹配**：第一轮按条目名（comment）匹配；未命中的新条目进入第二轮，按归一化后的内容匹配旧条目（容忍换行风格和空白差异），检测重命名
-   - **旧条目移除**：新卡中不存在的旧条目，其文件保留在原位不删除，末尾汇总输出未匹配文件路径
-7. 每个条目的 content 处理：
-   - 按条目名匹配内容
-   - **fresh 模式**：内容解析为 YAML 对象时保存为 `世界书/{name}.yaml`；内容为 XML 标签包裹的 YAML（如 `@@if` + `<tag>`）时拆分为 `contents` 片段；其余保存为 `世界书/{name}.txt`。文件名经 `sanitizeFilename` 净化特殊字符，同名文件自动添加 `_1`、`_2` 后缀避免覆盖
-   - **merge 模式**：保留旧 state 的目录结构和文件名主体，仅根据新内容格式调整后缀（`.yaml` ↔ `.txt`）。旧 `contents` 片段路径同样保留。新增条目走 fresh 模式的完整自动判定
-   - 存储方式变更时（如 `.txt` → `.yaml`、`path` ↔ `contents`）输出警告提示手动清理旧文件
-8. `regex_scripts` 中每个脚本的 `replaceString` 写入 `正则/{name}.txt`（如果非空），并设置 `replace_file` 字段
-9. `tavern_helper.scripts` 中每个脚本的 `content` 写入 `脚本/{name}.txt`（如果非空），并设置 `script_file` 字段。Zod 脚本已在步骤 5 中提取移除，此处仅处理普通脚本
-10. `first_messages` 写入 `开场白/0.txt`, `1.txt`, ...（[0] 为 first_mes，[1:] 为 alternate_greetings）。若 `mvu === true`，检测并提取开场白中的 `<UpdateVariable><initvar>` 块为独立 YAML 文件，同时填充 `initvar_overrides` 字段（详见 [机制原理](Mechanisms.md#initvar_override-嵌入与提取)）
-11. 生成 `tavern-cards-state.json`，根据输入文件类型设置 `form` 字段
-12. 输出目录优先级：`--output` > `--state` 所在目录（merge 模式） > `state_file` 所在目录 > 当前目录下以文件名命名的目录
+1. 读取 `artifact` 指向的 PNG/JSON 文件，自动识别格式（PNG → 角色卡；JSON → 检测扁平格式独立世界书或 `character_book` 嵌套格式角色卡）
+2. 提取所有条目转换为扁平 EntryManifestLeaf；MVU 项目自动设置 `mvu: true`、从 `tavern_helper.scripts` 检测并提取 Zod 脚本元数据写入 `state.zod`（详见 [机制原理](Mechanisms.md#mvu-检测)）
+3. **merge 模式**（默认）：与 `--state` 指向的旧 state 合并——条目先按名匹配，再按归一化内容匹配检测重命名；新卡不存在的旧条目文件保留不删除。`--output` 未指定时从 `--state` 路径推导
+4. **条目内容落盘**：fresh 模式按内容格式自动判定 `{name}.yaml` / `contents` 片段 / `{name}.txt`；merge 模式保留旧文件名主体、仅按新格式调整后缀。同名文件加 `_1`/`_2` 后缀；存储方式变更时输出警告
+5. `regex_scripts` 写入 `正则/{name}.txt`；`tavern_helper.scripts` 普通脚本写入 `脚本/{name}.txt`（Zod 脚本已在步骤 2 提取）；`first_messages` 写入 `开场白/0.txt`、`1.txt`...，MVU 项目额外提取 `<UpdateVariable><initvar>` 块为独立 YAML 并填充 `initvar_overrides`（详见 [机制原理](Mechanisms.md#initvar_override-嵌入与提取)）
+6. 生成 `tavern-cards-state.json`（按输入类型设置 `form`）；输出目录优先级：`--output` > `--state` 所在目录（merge） > `state_file` 所在目录 > 当前目录下以文件名命名的目录
 
 **示例：**
 
@@ -169,9 +121,6 @@ tavern-cards-forge unpack temp \
   --file ./MyCharacter.png \
   --output ./MyCharacter-project \
   --fresh
-
-# --fresh 和 --state 互斥
-tavern-cards-forge unpack temp --file ./MyCharacter.png --fresh --state ./state.json  # 报错
 
 # 提取角色卡 JSON
 tavern-cards-forge unpack <project> --json
@@ -253,15 +202,9 @@ tavern-cards-forge validate-mvu <project> [选项]
 
 **行为：**
 
-1. 读取 state.json，检查 `mvu === true`
-2. 检查 `state.zod` 存在；缺失时报错提示运行 `forge unpack` 自动填充
-3. 根据 `state.zod.schemaPath` 定位 `schema.ts`
-4. 用 jiti 加载 `schema.ts`，注入全局 `z`（Zod v4）和 `_`（lodash）
-   - 单文件产物已内置 jiti、Zod 和 lodash；`schema.ts` 直接使用全局 `z` / `_`，**禁止任何 `import` 语句**（含 `import { z } from 'zod'`、`import _ from 'lodash'`、CDN URL import、相对路径 import）——详见下一步预检
-5. 读取 `schema.ts` 后先预检：若含任何 `import` 语句，立即报错退出（与 `pack` 中的 schema.ts 预检一致——`z` / `_` 已是全局，且 forge 不会打包额外 npm 包）；随后检测重复字段键（同一 `z.object({...})` 内属性键重复即报错，含嵌套对象与 prefault 默认值对象）
-6. 解析指定的 initvar YAML 文件
-7. 用 Schema 校验 YAML 数据
-8. 校验通过打印成功信息，失败打印详细错误路径和原因
+1. 读取 state.json，检查 `mvu === true` 与 `state.zod` 存在（缺失时报错提示运行 `forge unpack` 自动填充）
+2. 用 jiti 加载 `state.zod.schemaPath` 指向的 `schema.ts`，注入全局 `z`（Zod v4）与 `_`（lodash）。单文件产物已内置这三者，`schema.ts` **禁止任何 `import` 语句**，预检命中即报错；同时检测同一 `z.object` 内重复字段键
+3. 解析指定的 initvar YAML 文件，用 Schema 校验；通过打印成功信息，失败打印详细错误路径与原因
 
 **示例：**
 
@@ -317,31 +260,21 @@ tavern-cards-forge query <project> <jsonpath> [选项]
 **示例：**
 
 ```bash
-# 顶层字段
+# 项目名 / form 等顶层字段
 tavern-cards-forge query <project> '$.projectName'
 tavern-cards-forge query <project> '$.form'
 
-# 条目名称列表（*~ 获取 key）
-tavern-cards-forge query <project> '$.entryManifest.character.*~'
+# 遍历某分类下条目名称（*~ 获取 key）
+tavern-cards-forge query <project> '$.entryManifest.角色.*~'
 
-# 所有条目的策略类型
+# 遍历所有条目的策略类型
 tavern-cards-forge query <project> '$.entryManifest[*][*].strategy.type'
 
-# 条目的插入顺序
-tavern-cards-forge query <project> '$.entryManifest[*][*].position.order'
-
-# 过滤表达式
-tavern-cards-forge query <project> '$.entryManifest[*][?(@.strategy.type==="constant")]'
+# 过滤表达式（禁用的条目）
 tavern-cards-forge query <project> '$.entryManifest[*][?(@.enabled===false)]'
-
-# 扩展字段
-tavern-cards-forge query <project> '$.extensions.talkativeness'
 
 # YAML 格式输出
 tavern-cards-forge query <project> '$.typeLists' --format yaml
-
-# 使用 --state 跳过项目查找
-tavern-cards-forge query temp '$.projectName' --state ./cards/MyCharacter/tavern-cards-state.json
 ```
 
 ### patch
@@ -363,39 +296,14 @@ tavern-cards-forge patch <project> [patch] [选项]
 
 **行为：**
 
-1. 加载 state.json 和 patch（文件/参数/stdin）
-2. **预检查**：
-    - `add` 操作：涉及文件路径字段时验证文件存在
-    - `replace` 操作：验证源文件存在、目标文件不存在（**注意**：不要提前手动重命名文件）
-    - 检测条目重命名并发出提醒
-3. 备份原 state.json 到 `.patch-history/{project}/{timestamp}.json`
+1. 加载 state.json 和 patch
+2. **预检查**：`add`/`replace` 涉及文件路径字段时验证源文件存在、目标不存在（**不要提前手动重命名**）；检测条目重命名并提醒
+3. 备份原 state 到 `.patch-history/{project}/{timestamp}.json`
 4. 执行文件 rename（仅当 replace 文件路径字段时）
-5. 应用 JSON Patch
-6. 验证结果符合 TavernCardsState schema
-   - 失败 → 回滚文件操作，恢复备份
-7. **验证提醒**：检查配置完整性（同 configure），不通过则输出警告但不中断
-8. 写入新 state.json
+5. 应用 JSON Patch；验证结果符合 TavernCardsState schema，失败则回滚文件操作与备份
+6. 检查配置完整性（同 configure），不通过则输出警告但不中断；写入新 state.json
 
-**文件自动重命名：**
-
-当 `replace` 操作修改文件路径字段时，patch 会自动执行文件重命名：
-
-- **不要提前手动重命名文件**，否则 precheck 会因源文件不存在而失败
-- patch 会验证：源文件存在 → 目标文件不存在 → 执行 rename → 更新 state
-
-**示例**：将 `正则/状态栏.txt` 改名为 `正则/状态栏.html`
-
-```bash
-# 正确做法：直接 patch，工具自动重命名文件
-tavern-cards-forge patch <project> '[{"op":"replace","path":"/regex_scripts/状态栏/replace_file","value":"正则/状态栏.html"}]'
-```
-
-```bash
-# 错误做法：手动 mv 后再 patch（precheck 会失败，因为源文件已不存在）
-mv 正则/状态栏.txt 正则/状态栏.html
-```
-
-**涉及的文件路径字段：**
+**文件自动重命名**：`replace` 修改文件路径字段时，patch 自动 rename（源存在 → 目标不存在 → rename → 更新 state）。**不要提前手动重命名**，否则 precheck 会因源文件不存在而失败。涉及字段：
 
 | 路径模式 | 说明 |
 |---------|------|
@@ -403,9 +311,17 @@ mv 正则/状态栏.txt 正则/状态栏.html
 | `/entryManifest/{type}/{name}/contents/{i}/file` | 内容片段文件 |
 | `/regex_scripts/{name}/replace_file` | 正则替换文件 |
 | `/extensions/tavern_helper/scripts/{name}/script_file` | 脚本文件 |
-| `/zod/schemaPath` | Zod schema 文件 |
-| `/avatar` | 头像 PNG |
-| `/first_messages/{i}` | 开场白文件 |
+| `/zod/schemaPath`、`/avatar`、`/first_messages/{i}` | Zod schema / 头像 / 开场白 |
+
+将 `正则/状态栏.txt` 改名为 `正则/状态栏.html`：
+
+```bash
+# ✓ 直接 patch，工具自动重命名
+tavern-cards-forge patch <project> '[{"op":"replace","path":"/regex_scripts/状态栏/replace_file","value":"正则/状态栏.html"}]'
+
+# ✗ 手动 mv 后再 patch（precheck 会失败）
+mv 正则/状态栏.txt 正则/状态栏.html
+```
 
 **示例：**
 
@@ -416,13 +332,9 @@ tavern-cards-forge patch <project> --file ./patches/update.json
 # 直接传入 JSON Patch 数组
 tavern-cards-forge patch <project> '[{"op":"remove","path":"/entryManifest/地理/废弃地点"}]'
 
-# 从 stdin/管道读取
+# 从 stdin/管道读取、预览、跳过备份
 echo '[{"op":"remove","path":"/entryManifest/地理/废弃地点"}]' | tavern-cards-forge patch <project>
-
-# 预览变更
 tavern-cards-forge patch <project> --file ./patches/update.json --dry-run
-
-# 跳过备份
 tavern-cards-forge patch <project> --file ./patches/update.json --no-backup
 ```
 
@@ -430,8 +342,8 @@ tavern-cards-forge patch <project> --file ./patches/update.json --no-backup
 
 ```json
 [
-  { "op": "add", "path": "/entryManifest/角色/新角色", "value": { "path": "contents/新角色.yaml", "keywords": ["新角色"] } },
-  { "op": "replace", "path": "/entryManifest/角色/主角/path", "value": "contents/新主角.yaml" },
+  { "op": "add", "path": "/entryManifest/角色/新角色", "value": { "path": "角色/新角色.yaml", "keywords": ["新角色"] } },
+  { "op": "replace", "path": "/entryManifest/角色/主角/path", "value": "角色/新主角.yaml" },
   { "op": "move", "from": "/entryManifest/NPC/村民A", "path": "/entryManifest/NPC/老村民" },
   { "op": "remove", "path": "/entryManifest/地理/废弃地点" }
 ]
@@ -442,18 +354,92 @@ tavern-cards-forge patch <project> --file ./patches/update.json --no-backup
 ```
 Precheck: OK
 Files:
-  renamed contents/主角.yaml → contents/新主角.yaml
+  renamed 角色/主角.yaml → 角色/新主角.yaml
 Applied 3 operations → tavern-cards-state.json
 Backup: .patch-history/MyCharacter/2026-05-09T143052.json
 ```
 
-**条目重命名提醒：**
+`move` 重命名条目时不会自动修改文件路径，输出提醒：`Warnings: renamed entry "旧名字" → "新名字", file paths unchanged. Consider updating path field for consistency.`
 
-当 `move` 操作重命名条目时，工具不会自动修改文件路径，而是输出提醒：
+### export
+
+从 forge 项目 state 导出 SillyTavern 可直接导入的三类资源：世界书、正则脚本、助手脚本。与 `pack` 不同，`export` 不产出整卡，而是按资源类型分别产出可独立导入的文件，且不受 `state.form` 限制。
 
 ```
-Warnings:
-  - renamed entry "旧名字" → "新名字", file paths unchanged. Consider updating path field for consistency.
+tavern-cards-forge export <project> [选项]
+```
+
+| 选项 | 说明 |
+|------|------|
+| `--state <path>` | 直接指定 state.json 路径；此时 `<project>` 仅为占位符 |
+| `--output <dir>` | 输出目录；默认 `<当前目录>/<projectName>-resources` |
+| `--kind <kind>` | 导出哪类资源：`worldbook`、`regex`、`helper` 逗号分隔列表，或 `all`（默认） |
+
+**产出文件：**
+
+| 资源 | 文件 | 格式 |
+|------|------|------|
+| 世界书 | `<worldbookName>.json` | 扁平格式（ST 可直接导入） |
+| 正则 | `regex-scripts/<scriptName>.json` | 单对象（与 ST 自家导出形态一致，可逐文件导入） |
+| 助手脚本 | `helper-scripts/<scriptName>.json` | Tavern Helper Script 单对象，每脚本一文件 |
+
+**示例：**
+
+```bash
+# 导出全部三类资源
+tavern-cards-forge export <project>
+
+# 仅导出世界书（charactercard 项目同样可导出世界书）
+tavern-cards-forge export <project> --kind worldbook
+
+# 仅导出正则
+tavern-cards-forge export <project> --kind regex
+
+# 仅导出助手脚本
+tavern-cards-forge export <project> --kind helper
+
+# 未注册项目时，使用占位符 + --state
+tavern-cards-forge export temp --state ./cards/MyCharacter/tavern-cards-state.json --output ./out
+```
+
+### split
+
+从已有角色卡（PNG 或 JSON）分离出 SillyTavern 可直接导入的三类资源，无需先建 forge 项目；条目数 / 脚本数与卡内完全一致。
+
+```
+tavern-cards-forge split <project> [选项]
+```
+
+| 选项 | 说明 |
+|------|------|
+| `--file <path>` | 输入角色卡（PNG 或 JSON）；未注册项目时必需 |
+| `--output <dir>` | 输出目录；默认 `<当前目录>/<worldbookName>-split` |
+| `--kind <kind>` | 分离哪类资源：`worldbook`、`regex`、`helper` 逗号分隔列表，或 `all`（默认） |
+
+世界书名优先级：嵌入式 `character_book.name` → 卡名 → 文件名。产出文件结构同 `export`。
+
+**输入形态**：`--file` 支持 PNG 角色卡与 JSON 文件。JSON 输入自动识别以下三种：
+
+- 角色 JSON 卡（V2/V3，含 `spec` + `data` 包装层）——与 PNG 卡读取相同的 `data.character_book` / `data.extensions` 路径
+- 独立世界书 JSON（扁平格式，`{ entries: {...} }`）——已是可导入形态，原样落盘
+- 顶层 `entries` 数组（`character_book` 嵌套格式平铺）——按嵌入式 book 转扁平
+
+PNG 与 JSON 角色卡的内嵌资源结构一致，分离产出**字节级等价**。
+
+**示例：**
+
+```bash
+# 从角色卡（PNG 或 JSON）分离全部资源（temp 仅为占位符）
+tavern-cards-forge split temp --file ./MyCharacter.png
+
+# 仅分离世界书
+tavern-cards-forge split temp --file ./MyCharacter.json --kind worldbook
+
+# 仅分离正则
+tavern-cards-forge split temp --file ./MyCharacter.png --kind regex
+
+# 仅分离助手脚本
+tavern-cards-forge split temp --file ./MyCharacter.json --kind helper
 ```
 
 ## 典型工作流
@@ -462,75 +448,38 @@ Warnings:
 
 ```bash
 # 1. 编写 .cardrc.json（注册项目、定义默认配置）
-# 2. 初始化项目（创建 state.json，写入 .cardrc.json 默认值）
+# 2. 初始化项目
 tavern-cards-forge init <project>
-
 # 3. 在 state.json 中设置项目属性（form、mvu 等）
 # 4. 编写内容文件，通过 patch 注册条目到 entryManifest
-# 5. 推导运行时字段
-tavern-cards-forge configure <project>
-
-# 6. 打包
-tavern-cards-forge pack <project>
+# 5. 推导运行时字段、打包
+tavern-cards-forge configure <project> && tavern-cards-forge pack <project>
 ```
 
-### MVU 角色卡
-
-在从零创建角色卡的基础上，编写 MVU 变量时增加以下步骤：
-
-```bash
-# 编写 schema.ts、世界书/变量/initvar.yaml、世界书/变量/变量更新规则.yaml
-# 复制模板文件、应用 JSON Patch 合并配置（由 skill 指导完成）
-# 校验 initvar.yaml
-tavern-cards-forge validate-mvu <project>
-```
+MVU 角色卡在此基础上编写 `schema.ts`、`initvar.yaml`、变量更新规则，并用 `forge validate-mvu <project>` 校验。
 
 ### 从现有角色卡导入
 
 ```bash
-# 1. 在 .cardrc.json 注册项目，设置 artifact 指向 PNG/JSON
-# 2. 解包
-tavern-cards-forge unpack <project>
-
-# 3. 初始化默认配置
-tavern-cards-forge init <project>
-
-# 4. 编辑 state.json（整理条目类型、移除 unknown）和内容文件
-# 5. 推导运行时字段
-tavern-cards-forge configure <project>
-
-# 6. 打包
-tavern-cards-forge pack <project>
+# 1. 在 .cardrc.json 注册项目（artifact 指向 PNG/JSON）
+# 2. 解包并初始化默认配置
+tavern-cards-forge unpack <project> && tavern-cards-forge init <project>
+# 3. 编辑 state.json 与内容文件、推导运行时字段、打包
+tavern-cards-forge configure <project> && tavern-cards-forge pack <project>
 ```
 
-**输出格式控制**：
+PNG/JSON 输出由 `avatar` 字段控制：保留路径 → PNG，清空 → JSON。
 
-- 保留 `avatar` 字段（如 `"avatar": "avatar.png"`）→ 输出 PNG 格式
-- 清空 `avatar` 字段（如 `"avatar": ""`）→ 输出 JSON 格式
+独立世界书导入导出同理：`unpack temp --file ./worldbook.json` 解包（`form` 自动置 `worldbook`），编辑后 `pack` 重出扁平格式独立世界书 JSON（即 ST 可导入格式，详见 [DataReference](DataReference.md#export--split-产出格式)）。
 
-### 无项目配置的快速操作
+### 无项目配置的临时操作
+
+temp 仅为占位符，直接指定输入/输出路径即可运行：
 
 ```bash
-# 直接指定文件路径，temp 仅为占位符
-tavern-cards-forge pack temp --state ./some-state.json --output ./output.png
-tavern-cards-forge unpack temp --file ./input.png --state ./existing-state.json  # merge 模式
-tavern-cards-forge unpack temp --file ./input.png --output ./output-dir --fresh  # 全新解包
+tavern-cards-forge pack     temp --state ./some-state.json --output ./output.png
+tavern-cards-forge unpack   temp --file ./input.png --state ./existing-state.json   # merge
+tavern-cards-forge unpack   temp --file ./input.png --output ./output-dir --fresh  # 全新解包
+tavern-cards-forge export   temp --state ./some-state.json --output ./out          # 从 state 导出可导入资源
+tavern-cards-forge split    temp --file ./card.png --output ./out                   # 从卡分离可导入资源
 ```
-
-### 独立世界书导入导出
-
-```bash
-# 1. 解包独立世界书 JSON
-tavern-cards-forge unpack temp --file ./worldbook.json --output ./worldbook-project
-
-# 2. 编辑 tavern-cards-state.json 和世界书内容文件
-
-# 3. 重新打包为独立世界书 JSON
-tavern-cards-forge pack temp --state ./worldbook-project/tavern-cards-state.json --output ./worldbook-new.json
-```
-
-**注意事项**：
-
-- 独立世界书解包后，`form` 字段会自动设置为 `"worldbook"`
-- 打包时会自动使用扁平格式输出 JSON 文件
-- 支持在扁平格式和 SillyTavern 标准格式之间无损转换

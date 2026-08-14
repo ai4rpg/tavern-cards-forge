@@ -6,6 +6,8 @@ import { registerPatch } from './command/patch.js';
 import { registerConfigure } from './command/configure.js';
 import { registerInit } from './command/init.js';
 import { registerValidateMvu } from './command/validate-mvu.js';
+import { registerExport } from './command/export.js';
+import { registerSplit } from './command/split.js';
 import { ProjectNotFoundError } from './settings.js';
 
 function exitOnError(fn: (...args: any[]) => Promise<void>) {
@@ -39,5 +41,7 @@ registerPatch(program, exitOnError);
 registerConfigure(program, exitOnError);
 registerInit(program, exitOnError);
 registerValidateMvu(program, exitOnError);
+registerExport(program, exitOnError);
+registerSplit(program, exitOnError);
 
 program.parse();

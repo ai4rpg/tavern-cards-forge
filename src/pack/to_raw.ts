@@ -242,22 +242,15 @@ export function toFlatWorldbookEntry(
     matchScenario: false,
     matchCreatorNotes: false,
     triggers: [],
-    characterFilter: [],
   };
 }
 
 export function buildFlatWorldbook(
   leaves: Array<EntryManifestLeaf & { name: string; content: string }>,
-  name: string,
 ): Record<string, any> {
   const entries: Record<string, any> = {};
-  
   for (let i = 0; i < leaves.length; i++) {
     entries[i.toString()] = toFlatWorldbookEntry(leaves[i], i);
   }
-  
-  return {
-    name,
-    entries,
-  };
+  return { entries };
 }

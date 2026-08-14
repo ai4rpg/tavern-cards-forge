@@ -341,9 +341,9 @@ MVU Zod 脚本元数据，以 `zod` 字段存储在 `TavernCardsState` 顶层。
 
 | 格式类型 | 文件类型 | 用途 | 条目格式 |
 |---------|---------|------|---------|
-| 角色卡（PNG） | PNG | 包含头像和世界书的角色定义 | SillyTavern 标准格式 |
-| 角色卡（JSON） | JSON | 无头像的角色定义 | SillyTavern 标准格式 |
-| 独立世界书 | JSON | 独立的世界书文件 | 扁平格式 |
+| 角色卡（PNG） | PNG | 包含头像和世界书的角色定义 | `character_book` 嵌套格式（snake_case + `extensions`） |
+| 角色卡（JSON） | JSON | 无头像的角色定义 | `character_book` 嵌套格式（snake_case + `extensions`） |
+| 独立世界书 | JSON | 独立的世界书文件 | 扁平格式（camelCase，ST 可直接导入） |
 
 **输出格式选择规则**：
 
@@ -358,8 +358,8 @@ MVU Zod 脚本元数据，以 `zod` 字段存储在 `TavernCardsState` 顶层。
 
 **格式差异说明**：
 
-- **角色卡（PNG/JSON）**：使用 SillyTavern 标准格式，条目字段嵌套在 `extensions` 对象中，包含角色元数据（description、first_messages 等）
-- **独立世界书**：使用扁平格式，字段名更简洁（如 `order` 而非 `insertion_order`），无角色元数据
+- **角色卡（PNG/JSON）**：条目以 `character_book` 嵌套格式存储，字段为 snake_case（如 `insertion_order`），运行时镜像字段放在 `extensions` 对象中，同时含角色元数据（description、first_messages 等）
+- **独立世界书**：使用扁平格式，字段为 camelCase（如 `order`），条目直接展开（无 `character_book` 包裹、无 `extensions` 镜像、无角色元数据）。该格式即 SillyTavern 独立世界书的可导入格式：ST 导入仅校验 `entries` 字段存在，world 名取文件名 stem。条目缺 `extensions` 镜像属无害差异，ST 运行时有 `?? default` 回退
 
 ### 角色卡版本
 
@@ -376,7 +376,7 @@ MVU Zod 脚本元数据，以 `zod` 字段存储在 `TavernCardsState` 顶层。
 
 ### 世界书格式对比
 
-| 项目 | SillyTavern 标准格式（角色卡内） | 扁平格式（独立世界书） |
+| 项目 | `character_book` 嵌套格式（角色卡内） | 扁平格式（独立世界书） |
 |------|------------------------------|---------------------|
 | 条目顺序 | `insertion_order` | `order` |
 | 位置 | `extensions.position` | `position` |
@@ -410,13 +410,27 @@ MVU Zod 脚本元数据，以 `zod` 字段存储在 `TavernCardsState` 顶层。
    - 检测文件结构：
      - 有 `spec` 字段（如 `"spec": "chara_card_v3"`）→ 角色卡 JSON，`form = "charactercard"`
      - 有 `entries` 对象且第一个条目包含 `order` 字段 → 扁平格式世界书，`form = "worldbook"`
-     - 有 `entries` 数组 → SillyTavern 标准格式世界书，`form = "worldbook"`
+     - 有 `entries` 数组 → `character_book` 嵌套格式世界书（V2 spec），`form = "worldbook"`
 
 **pack** 时根据 `form` 和 `avatar` 字段选择输出格式：
 
-- `form = "charactercard"` 且 `avatar` 非空 → PNG（SillyTavern 标准格式）；若 avatar 内容不是合法 PNG，回退 JSON（标准格式）并警告
-- `form = "charactercard"` 且 `avatar` 为空 → JSON（SillyTavern 标准格式）
-- `form = "worldbook"` → JSON（扁平格式）
+- `form = "charactercard"` 且 `avatar` 非空 → PNG（`character_book` 嵌套格式）；若 avatar 内容不是合法 PNG，回退 JSON（嵌套格式）并警告
+- `form = "charactercard"` 且 `avatar` 为空 → 角色 JSON 卡（`character_book` 嵌套格式）
+- `form = "worldbook"` → 独立世界书 JSON（扁平格式）
+
+### export / split 产出格式
+
+`export` / `split` 与 `pack` 不同——不产出整卡，而是按资源类型产出 SillyTavern 可逐项导入的独立文件。世界书统一使用扁平格式；`export` 不受 `state.form` 限制——`charactercard` 项目同样可导出世界书。
+
+**`split` 输入形态**：`--file` 支持 PNG 角色卡与 JSON 文件。JSON 输入覆盖角色 JSON 卡（V2/V3，含 `spec` + `data` 包装层）、独立世界书 JSON（扁平格式，原样落盘）、顶层 `entries` 数组（`character_book` 嵌套格式平铺）。PNG 与 JSON 角色卡的内嵌资源结构一致，分离产出字节级等价。
+
+| 资源 | 产出文件 | 内容形态 | 导入方式 |
+|------|---------|---------|--------|
+| 世界书 | `<worldbookName>.json` | 扁平格式：`{ entries: { uid: ...扁平条目 } }` | ST 世界书导入（world 名 = 文件名 stem） |
+| 正则 | `regex-scripts/<scriptName>.json` | 单对象 | ST 正则导入（与 ST 自家导出形态一致，每脚本一文件） |
+| 助手脚本 | `helper-scripts/<scriptName>.json` | Tavern Helper `Script` 单对象 | JS-Slash-Runner 扩展逐文件导入 |
+
+**世界书未携带的字段**：扁平条目不含 `extensions` 镜像、顶层不含 `originalData`、条目无 `characterFilter`、顶层无 `name`。这些均为无害差异：`originalData` 只是 ST 从卡转换世界书时的运行时痕迹（UI 新建世界书没有）；`extensions` 镜像运行时读字段有 `?? default` 回退；`name` / `characterFilter` ST 导入与运行时均不依赖。
 
 ## 项目目录结构示例
 

@@ -112,7 +112,7 @@ function resolvePackState(state: TavernCardsState, stateDir: string, zodSubject?
 
 export function buildWorldbookJson(state: TavernCardsState, stateDir: string, depthDefaults?: CardrcConfig['depth_defaults']): string {
   const resolved = resolveFiles(state, stateDir);
-  const raw = buildFlatWorldbook(resolved, state.worldbookName);
+  const raw = buildFlatWorldbook(resolved);
   return JSON.stringify(raw, null, 2);
 }
 

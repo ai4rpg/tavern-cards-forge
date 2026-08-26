@@ -58,13 +58,31 @@ export function convertTavernHelperToState(raw: SillyTavernTavernHelper | undefi
   return result.scripts !== undefined || result.variables !== undefined ? result : undefined;
 }
 
+/** tags 规范化: 数组原样(去空串), 逗号分隔字符串按 ST charaFormatData 拆分, 其余为 [] */
+function normalizeTags(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return raw.filter((t): t is string => typeof t === 'string').map(t => t.trim()).filter(Boolean);
+  }
+  if (typeof raw === 'string') {
+    return raw.split(',').map(t => t.trim()).filter(Boolean);
+  }
+  return [];
+}
+
 export function buildCharacterMeta(data: any): Record<string, any> {
   return {
     description: data.data?.description ?? data.description ?? '',
+    personality: data.data?.personality ?? data.personality ?? '',
+    scenario: data.data?.scenario ?? data.scenario ?? '',
     first_messages: [
       data.data?.first_mes ?? data.first_mes ?? '',
       ...(data.data?.alternate_greetings ?? []),
     ].filter(g => g && g.trim()),
+    mes_example: data.data?.mes_example ?? data.mes_example ?? '',
+    // system_prompt / post_history_instructions 按 ST 规范只活在 data.*; 顶层 fallback 只防畸形卡
+    system_prompt: data.data?.system_prompt ?? data.system_prompt ?? '',
+    post_history_instructions: data.data?.post_history_instructions ?? data.post_history_instructions ?? '',
+    tags: normalizeTags(data.data?.tags ?? data.tags),
     creator: data.data?.creator ?? '',
     creator_notes: data.data?.creator_notes ?? data.creatorcomment ?? '',
     version: data.data?.character_version ?? '',

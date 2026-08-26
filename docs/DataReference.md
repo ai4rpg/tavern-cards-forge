@@ -99,7 +99,13 @@
   // 角色卡元数据 (form=charactercard 时)
   "avatar": "avatar.png",
   "description": "角色描述",
+  "personality": "性格摘要",           // 可选，空时缺省
+  "scenario": "情景设定",              // 可选，空时缺省
   "first_messages": ["开场白/0.txt", "开场白/1.txt"],
+  "mes_example": "对话示例",           // 可选，空时缺省
+  "system_prompt": "角色卡系统提示",   // 可选，空时缺省，pack 时仅写入 data.*
+  "post_history_instructions": "历史后指令", // 可选，空时缺省，pack 时仅写入 data.*
+  "tags": ["tag1", "tag2"],            // 可选，空时缺省
   "initvar_overrides": {                   // 可选，MVU 项目不同开场白的独立 initvar
     "开场白/1.txt": "开场白/initvar/1.yaml"  // key=开场白路径，value=override YAML 路径
   },
@@ -358,7 +364,7 @@ MVU Zod 脚本元数据，以 `zod` 字段存储在 `TavernCardsState` 顶层。
 
 **格式差异说明**：
 
-- **角色卡（PNG/JSON）**：条目以 `character_book` 嵌套格式存储，字段为 snake_case（如 `insertion_order`），运行时镜像字段放在 `extensions` 对象中，同时含角色元数据（description、first_messages 等）
+- **角色卡（PNG/JSON）**：条目以 `character_book` 嵌套格式存储，字段为 snake_case（如 `insertion_order`），运行时镜像字段放在 `extensions` 对象中，同时含角色元数据（description、personality、scenario、mes_example、system_prompt、post_history_instructions、tags、first_messages 等）
 - **独立世界书**：使用扁平格式，字段为 camelCase（如 `order`），条目直接展开（无 `character_book` 包裹、无 `extensions` 镜像、无角色元数据）。该格式即 SillyTavern 独立世界书的可导入格式：ST 导入仅校验 `entries` 字段存在，world 名取文件名 stem。条目缺 `extensions` 镜像属无害差异，ST 运行时有 `?? default` 回退
 
 ### 角色卡版本

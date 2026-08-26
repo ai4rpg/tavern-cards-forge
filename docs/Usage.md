@@ -99,7 +99,7 @@ tavern-cards-forge unpack <project> [选项]
 **行为：**
 
 1. 读取 `artifact` 指向的 PNG/JSON 文件，自动识别格式（PNG → 角色卡；JSON → 检测扁平格式独立世界书或 `character_book` 嵌套格式角色卡）
-2. 提取所有条目转换为扁平 EntryManifestLeaf；MVU 项目自动设置 `mvu: true`、从 `tavern_helper.scripts` 检测并提取 Zod 脚本元数据写入 `state.zod`（详见 [机制原理](Mechanisms.md#mvu-检测)）
+2. 提取所有条目转换为扁平 EntryManifestLeaf；MVU 项目自动设置 `mvu: true`、从 `tavern_helper.scripts` 检测并提取 Zod 脚本元数据写入 `state.zod`（详见 [机制原理](Mechanisms.md#mvu-检测)）；角色卡的 description、first_messages 写入 state；personality、scenario、mes_example、system_prompt、post_history_instructions、tags 非空时写入（空值缺省，pack 时按空值写回卡内）
 3. **merge 模式**（默认）：与 `--state` 指向的旧 state 合并——条目先按名匹配，再按归一化内容匹配检测重命名；新卡不存在的旧条目文件保留不删除。`--output` 未指定时从 `--state` 路径推导
 4. **条目内容落盘**：fresh 模式按内容格式自动判定 `{name}.yaml` / `contents` 片段 / `{name}.txt`；merge 模式保留旧文件名主体、仅按新格式调整后缀。同名文件加 `_1`/`_2` 后缀；存储方式变更时输出警告
 5. `regex_scripts` 写入 `正则/{name}.txt`；`tavern_helper.scripts` 普通脚本写入 `脚本/{name}.txt`（Zod 脚本已在步骤 2 提取）；`first_messages` 写入 `开场白/0.txt`、`1.txt`...，MVU 项目额外提取 `<UpdateVariable><initvar>` 块为独立 YAML 并填充 `initvar_overrides`（详见 [机制原理](Mechanisms.md#initvar_override-嵌入与提取)）

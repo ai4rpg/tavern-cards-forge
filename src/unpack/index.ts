@@ -170,6 +170,12 @@ export async function runUnpack(
       extensions: characterMeta.extensions,
       regex_scripts: characterMeta.regex_scripts,
     });
+    // 可选元数据: 空值不写入 state, 保持 state.json 紧凑; pack 时缺省按 ''/[] 写入卡内
+    for (const key of ['personality', 'scenario', 'mes_example', 'system_prompt', 'post_history_instructions'] as const) {
+      const value = characterMeta[key];
+      if (value) state[key] = value;
+    }
+    if (characterMeta.tags?.length) state.tags = characterMeta.tags;
   }
 
   if (detectMvu(state)) {

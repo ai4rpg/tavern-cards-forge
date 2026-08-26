@@ -1,5 +1,5 @@
 import type { SillyTavernEntry, SillyTavernCharacter, SillyTavernTavernHelper, SillyTavernRegexScript, NumericPosition, NumericRole, NumericSelectiveLogic } from '../type/sillytavern.js';
-import type { EntryManifestLeaf, TavernHelper, RegexScript } from '../type/state.js';
+import type { EntryManifestLeaf, TavernHelper, RegexScript, TavernCardsState } from '../type/state.js';
 import type { CardrcConfig } from '../type/settings.js';
 
 const POSITION_MAP: Record<string, NumericPosition> = {
@@ -78,6 +78,8 @@ export function toSillyTavernEntry(
     selective: isSelective,
     insertion_order: position.order,
     enabled: leaf.enabled !== false,
+    // 顶层 position 按 CCv2 spec / ST charaFormatData 只区分 before_char / after_char,
+    // 完整位置(at_depth 等)在 extensions.position 数字, 与 ST 原生导出一致
     position: position.type === 'before_character_definition' ? 'before_char' : 'after_char',
     use_regex: true,
     extensions: {
@@ -118,18 +120,13 @@ export function toSillyTavernEntry(
 }
 
 export function buildSillyTavernCharacter(
-  state: {
-    projectName: string;
-    worldbookName: string;
-    description: string;
-    first_messages: string[];
-    creator: string;
-    creator_notes: string;
-    version: string;
-    create_date?: string;
-    extensions?: Record<string, any>;
-    regex_scripts?: Record<string, RegexScript>;
-  },
+  state: Pick<TavernCardsState,
+    | 'projectName' | 'worldbookName'
+    | 'description' | 'personality' | 'scenario' | 'first_messages' | 'mes_example'
+    | 'system_prompt' | 'post_history_instructions' | 'tags'
+    | 'creator' | 'creator_notes' | 'version' | 'create_date'
+    | 'extensions' | 'regex_scripts'
+  >,
   leaves: Array<EntryManifestLeaf & { name: string; content: string }>,
   depthDefaults?: CardrcConfig['depth_defaults'],
 ): SillyTavernCharacter {
@@ -137,35 +134,37 @@ export function buildSillyTavernCharacter(
   const firstMes = state.first_messages[0] ?? '';
   const altGreetings = state.first_messages.slice(1);
 
+  // system_prompt / post_history_instructions 仅写 data.*: ST spec 顶层没有这两项, 也不提升
+  // 可选元数据缺省时按 ''/[] 写入卡内, 与 ST charaFormatData 两侧都写的行为一致
   return {
     name: state.projectName,
     description: state.description,
-    personality: '',
-    scenario: '',
+    personality: state.personality ?? '',
+    scenario: state.scenario ?? '',
     first_mes: firstMes,
-    mes_example: '',
+    mes_example: state.mes_example ?? '',
     creatorcomment: state.creator_notes,
     avatar: 'none',
     talkativeness: '0.5',
     fav: false,
-    tags: [],
+    tags: state.tags ?? [],
     spec: 'chara_card_v3',
     spec_version: '3.0',
     create_date: state.create_date ?? '',
     data: {
       name: state.projectName,
       description: state.description,
-      personality: '',
-      scenario: '',
+      personality: state.personality ?? '',
+      scenario: state.scenario ?? '',
       first_mes: firstMes,
-      mes_example: '',
+      mes_example: state.mes_example ?? '',
       creator_notes: state.creator_notes,
       creator: state.creator,
       character_version: state.version,
       alternate_greetings: altGreetings,
-      system_prompt: '',
-      post_history_instructions: '',
-      tags: [],
+      system_prompt: state.system_prompt ?? '',
+      post_history_instructions: state.post_history_instructions ?? '',
+      tags: state.tags ?? [],
       extensions: {
         world: state.worldbookName,
         regex_scripts: state.regex_scripts ? toSillyTavernRegexScripts(state.regex_scripts) : [],

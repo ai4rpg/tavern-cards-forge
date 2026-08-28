@@ -1,5 +1,5 @@
 {
-  "name": "tavern-cards-forge",
+  "name": "@ai4rpg/tavern-cards-forge",
   "version": "0.1.0",
   "description": "CLI tool for offline packing/unpacking SillyTavern character cards and worldbooks",
   "license": "MIT",
@@ -10,9 +10,13 @@
   "bin": {
     "tavern-cards-forge": "./dist/index.mjs"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup",
-    "dev": "tsup --watch"
+    "dev": "tsup --watch",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "commander": "^13",

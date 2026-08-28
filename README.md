@@ -1,6 +1,6 @@
-# tavern-cards-forge
+# @ai4rpg/tavern-cards-forge
 
-tavern-cards-forge 是一个离线 CLI 工具，用于在 SillyTavern 角色卡 (PNG) / 世界书 (JSON) 与可编辑的项目目录之间互相转换。
+`@ai4rpg/tavern-cards-forge`（CLI 命令仍为 `tavern-cards-forge`）是一个离线 CLI 工具，用于在 SillyTavern 角色卡 (PNG) / 世界书 (JSON) 与可编辑的项目目录之间互相转换。
 
 主要目的是作为 skill 的配合脚本: 把角色卡和世界书拆成稳定、可读的文件结构，让 AI 可以更可靠地批量创建、整理、校验和重打包卡片内容，并提供标准的JSON Patch和JSON Path 编辑、查询状态文件。
 

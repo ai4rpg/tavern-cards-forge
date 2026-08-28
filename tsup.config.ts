@@ -9,25 +9,6 @@ export default defineConfig({
   clean: true,
   dts: false,
   outDir: 'dist',
-  banner: {
-    js: [
-      '#!/usr/bin/env node',
-      "import { createRequire as __tcfCreateRequire } from 'module';",
-      'const require = __tcfCreateRequire(import.meta.url);',
-    ].join('\n'),
-  },
+  banner: { js: '#!/usr/bin/env node' },
   outExtension: () => ({ js: '.mjs' }),
-  noExternal: [
-    'commander',
-    'crc',
-    'fast-json-patch',
-    'jiti',
-    'jschardet',
-    'lodash',
-    'png-chunk-text',
-    'png-chunks-extract',
-    'yaml',
-    'jsonpath-plus',
-    'zod',
-  ],
 });

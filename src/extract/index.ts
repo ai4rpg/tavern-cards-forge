@@ -1,11 +1,11 @@
 /**
  * 两类来源的酒馆可导入资源产出：
  * - runExport：forge 项目 state → 世界书 / 正则 / 助手脚本（打包/导出方向）
- * - runSplit ：maturity 角色卡 PNG/JSON → 同上三类（分离方向，无需先建项目）
+ * - runSplit ：已有角色卡 PNG/JSON → 同上三类（分离方向，无需先建项目）
  *
  * 命令：`forge export`、`forge split`。二者共用本模块的产物落盘逻辑（见 ./build.ts）。
  */
-import { resolve, join, basename, dirname, extname, isAbsolute } from 'node:path';
+import { resolve, basename, dirname, extname, isAbsolute } from 'node:path';
 import { mkdirSync, existsSync, statSync } from 'node:fs';
 import { resolveProject, requireConfiguredProject, ProjectNotFoundError } from '../cli/settings.js';
 import { detailedParse } from '../util/prettified_parse.js';
@@ -24,12 +24,11 @@ import {
   collectRequestedFilePaths,
   checkMissingFiles,
   parseKinds,
-  ALL_KINDS,
-  type ResourceKind,
   type ExportSummary,
 } from './build.js';
 import { extractCharaFromPng } from '../pack/png_encode.js';
 import { convertTavernHelperToState, isCharacterCardJson } from '../unpack/from_sillytavern.js';
+import type { FlatWorldbookEntry } from '../type/entry-flat.js';
 import { readFileSync } from 'node:fs';
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -38,7 +37,7 @@ import { readFileSync } from 'node:fs';
 
 export async function runExport(
   project: string,
-  opts: { state?: string; output?: string; kind?: string; regex?: string },
+  opts: { state?: string; output?: string; kind?: string },
 ) {
   const { statePath, projectFound } = resolveProject(project, { state: opts.state });
   if (!projectFound && !opts.state) {
@@ -85,7 +84,7 @@ export async function runExport(
 
 export async function runSplit(
   project: string,
-  opts: { file?: string; output?: string; kind?: string; regex?: string },
+  opts: { file?: string; output?: string; kind?: string },
 ) {
   const { projectFound, artifactPath } = resolveProject(project, { artifact: opts.file });
   if (!projectFound && !opts.file) {
@@ -93,7 +92,7 @@ export async function runSplit(
   }
 
   const cwd = process.cwd();
-  const filePath = opts.file ? resolve(cwd, opts.file) : (opts.file ?? artifactPath!)!;
+  const filePath = opts.file ? resolve(cwd, opts.file) : artifactPath!;
   if (!filePath) {
     throw new ProjectNotFoundError(project, 'Provide --file to specify input.');
   }
@@ -152,7 +151,7 @@ export async function runSplit(
 // ─── 辅助 ────────────────────────────────────────────────────────────────────
 
 /** 从角色卡数据构建扁平 World Info（酒馆可导入格式）。兼容嵌入式 character_book、顶层数组、以及已是扁平/on-disk 的独立 WI。 */
-function buildCardWorldInfo(data: any): Record<string, any> | null {
+function buildCardWorldInfo(data: any): { entries: Record<string, FlatWorldbookEntry> } | null {
   const book = data?.data?.character_book;
   if (book && (Array.isArray(book.entries) || book.entries === undefined)) {
     const entries = Array.isArray(book.entries) ? book.entries : [];

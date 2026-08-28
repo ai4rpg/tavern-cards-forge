@@ -229,7 +229,7 @@ export async function runUnpack(
   }
 
   // --- 脚本/ : tavern_helper scripts content ---
-  // Zod 脚本已在 detectAndExtractZodFromCard 中从 scripts 积除，此处只处理普通脚本
+  // Zod 脚本已在 detectAndExtractZodFromCard 中从 scripts 剔除，此处只处理普通脚本
   const tavernHelper = state.extensions?.tavern_helper;
   if (tavernHelper?.scripts && Object.keys(tavernHelper.scripts).length > 0) {
     const scriptsDir = join(outputDir, DIR_SCRIPTS);

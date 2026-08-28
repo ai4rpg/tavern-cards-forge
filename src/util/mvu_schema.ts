@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { existsSync } from 'node:fs';
 import { createJiti } from 'jiti/static';
 import * as z from 'zod';
-import * as _ from 'lodash';
+import _ from 'lodash';
 import * as yaml from 'yaml';
 import { readFileText } from './file_io.js';
 import { detailedParse } from './prettified_parse.js';

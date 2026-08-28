@@ -95,7 +95,7 @@ export async function runPack(project: string, opts: { state?: string; output?: 
       throw new Error('state.mvu = true but no [InitVar] entry or MagVarUpdate script found');
     }
 
-    // 1. Zod 脚本内容校验 + 预计算 zodSync
+    // Zod 脚本内容校验 + 预计算 zodSync
     if (state.zod) {
       zodSync = prepareZodSync(stateDir, state.zod);
       const issues = validateZodScriptContent(zodSync.zodSubject);
@@ -106,21 +106,20 @@ export async function runPack(project: string, opts: { state?: string; output?: 
       if (errors.length > 0) throw new Error(errors.join('\n'));
     }
 
-    // 2. 校验 MVU 条目和脚本的启用状态
+    // 校验 MVU 条目启用状态
     const enabledErrors = validateMvuEnabledState(state);
     if (enabledErrors.length > 0) {
       throw new Error('MVU enabled state validation failed:\n' + enabledErrors.map(e => `  - ${e}`).join('\n'));
     }
 
-    // 3. 校验默认 initvar 与 schema.ts 一致性
-    //    加载 Schema 实例一次，后续所有 initvar 校验复用（避免多次 jiti 初始化）
+    // 加载 Schema 实例一次，后续所有 initvar 校验复用（避免多次 jiti 初始化）
     let schemaInstance: z.ZodType | undefined;
     const schemaAbsPath = zodSync ? resolve(stateDir, state.zod!.schemaPath) : undefined;
     if (schemaAbsPath && existsSync(schemaAbsPath)) {
       schemaInstance = await loadMvuSchema(schemaAbsPath, { schemaContent: zodSync?.schemaContent });
     }
 
-    // 3/4. 校验默认 initvar（世界书条目）与 initvar_overrides（开场白尾随代码块）并汇总计数，避免逐项成功汇报淹没输出
+    // 校验默认 initvar（世界书条目）与 initvar_overrides（开场白尾随代码块）并汇总计数，避免逐项成功汇报淹没输出
     let defaultChecked = false;
     let overrideCount = 0;
     const result = await validateMvuInitvar(
@@ -152,7 +151,7 @@ export async function runPack(project: string, opts: { state?: string; output?: 
   }
 
   if (state.form === 'worldbook') {
-    const json = buildWorldbookJson(state, stateDir, cardrc.depth_defaults);
+    const json = buildWorldbookJson(state, stateDir);
     output = writeArtifact(output, stateDir, state.worldbookName, 'json', json);
     console.log(`Packed worldbook → ${output}`);
   } else {

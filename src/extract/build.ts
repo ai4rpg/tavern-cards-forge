@@ -1,12 +1,10 @@
 /**
  * 三类酒馆可导入资源（世界书 / 正则 / 助手脚本）的纯数据构建。
  *
- * 格式依据：本机 `/home/lyne7/Games/SillyTavern/`（AGPL 开源，本仓消费其导入端点的格式契约）。
- * 详见 `.pi/blackboard/format-source-notes.md`。
+ * 格式依据：SillyTavern（AGPL 开源）导入端点的格式契约。
  *
  * 世界书采用 forge 扁平格式（camelCase 条目 + `entries` 对象）——即酒馆可导入格式
- * （ST 导入仅校验 `entries` 存在；本机真实 on-disk WI 亦无顶层 `name`/`originalData`）。
- * 详见 `.pi/blackboard/fix.md` 的三层比对结论。
+ * （ST 导入仅校验 `entries` 存在；ST 原生 on-disk WI 亦无顶层 `name`/`originalData`）。
  *
  * 本模块仅做数据转换 + 文件落盘，不触碰 state 结构与既有 pack/unpack 行为。
  */
@@ -18,6 +16,7 @@ import { buildFlatWorldbook } from '../pack/to_raw.js';
 import { prepareZodSync, buildZodScriptEntry } from '../util/mvu_schema.js';
 import { sanitizeFilename } from '../util/sanitize_filename.js';
 import type { TavernCardsState } from '../type/state.js';
+import type { FlatWorldbookEntry } from '../type/entry-flat.js';
 
 export type ResourceKind = 'worldbook' | 'regex' | 'helper';
 
@@ -47,8 +46,8 @@ interface CharacterBook {
  *
  * 与 `toFlatWorldbookEntry` 产出同一字段集，确保 export（从 state）与 split（从卡）结构一致。条目以 `id` 作 key。
  */
-export function characterBookToFlatWorldInfo(book: CharacterBook): Record<string, any> {
-  const entries: Record<string, any> = {};
+export function characterBookToFlatWorldInfo(book: CharacterBook): { entries: Record<string, FlatWorldbookEntry> } {
+  const entries: Record<string, FlatWorldbookEntry> = {};
   book.entries.forEach((entry, index) => {
     const id = entry.id ?? index;
     entries[String(id)] = characterBookEntryToFlat(entry, index);
@@ -57,7 +56,7 @@ export function characterBookToFlatWorldInfo(book: CharacterBook): Record<string
 }
 
 /** snake_case character_book 条目 → camelCase 扁平条目（字段集与 `toFlatWorldbookEntry` 一致）。 */
-function characterBookEntryToFlat(entry: any, index: number): Record<string, any> {
+function characterBookEntryToFlat(entry: any, index: number): FlatWorldbookEntry {
   const ext = entry.extensions ?? {};
   return {
     uid: entry.id ?? index,
@@ -72,7 +71,7 @@ function characterBookEntryToFlat(entry: any, index: number): Record<string, any
     addMemo: false,
     order: entry.insertion_order,
     position: ext.position ?? (entry.position === 'before_char' ? 0 : 1),
-    disable: entry.enabled !== true,
+    disable: entry.enabled === false,
     ignoreBudget: ext.ignore_budget ?? false,
     excludeRecursion: ext.exclude_recursion ?? true,
     preventRecursion: ext.prevent_recursion ?? true,
@@ -112,7 +111,7 @@ function characterBookEntryToFlat(entry: any, index: number): Record<string, any
 export function buildStateWorldInfo(
   state: TavernCardsState,
   stateDir: string,
-): Record<string, any> {
+): { entries: Record<string, FlatWorldbookEntry> } {
   const leaves = resolveFiles(state, stateDir);
   return buildFlatWorldbook(leaves);
 }
@@ -251,11 +250,11 @@ function toImportableHelperScript(s: any, name: string): Record<string, any> {
 
 // ─── 落盘 ────────────────────────────────────────────────────────────────────
 
-function worldInfoEntryCount(wi: { entries: Record<string, any> }): number {
+function worldInfoEntryCount(wi: { entries: Record<string, FlatWorldbookEntry> }): number {
   return Object.keys(wi.entries).length;
 }
 
-export function writeWorldInfo(outDir: string, worldName: string, wi: any): ExportSummary {
+export function writeWorldInfo(outDir: string, worldName: string, wi: { entries: Record<string, FlatWorldbookEntry> }): ExportSummary {
   const file = `${sanitizeFilename(worldName)}.json`;
   writeJson(join(outDir, file), wi);
   return { kind: 'worldbook', relPath: file, count: worldInfoEntryCount(wi), label: 'world book' };

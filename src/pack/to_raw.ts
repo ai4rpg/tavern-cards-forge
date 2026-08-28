@@ -1,6 +1,7 @@
 import type { SillyTavernEntry, SillyTavernCharacter, SillyTavernTavernHelper, SillyTavernRegexScript, NumericPosition, NumericRole, NumericSelectiveLogic } from '../type/sillytavern.js';
 import type { EntryManifestLeaf, TavernHelper, RegexScript, TavernCardsState } from '../type/state.js';
 import type { CardrcConfig } from '../type/settings.js';
+import type { FlatWorldbookEntry } from '../type/entry-flat.js';
 
 const POSITION_MAP: Record<string, NumericPosition> = {
   before_character_definition: 0,
@@ -114,7 +115,6 @@ export function toSillyTavernEntry(
       match_creator_notes: false,
       triggers: [],
       ignore_budget: false,
-      // extra 字段已移除（v0.x 破坏性变更）；额外扩展请直接在 extensions 上添加
     },
   };
 }
@@ -193,7 +193,7 @@ function omitKeys(obj: Record<string, any>, ...keys: string[]): Record<string, a
 export function toFlatWorldbookEntry(
   leaf: EntryManifestLeaf & { name: string; content: string },
   index: number,
-): Record<string, any> {
+): FlatWorldbookEntry {
   const strategy = leaf.strategy ?? { type: 'constant' as const };
   const position = leaf.position ?? { type: 'after_character_definition' as const, order: 0 };
   const isConstant = strategy.type === 'constant';
@@ -246,8 +246,8 @@ export function toFlatWorldbookEntry(
 
 export function buildFlatWorldbook(
   leaves: Array<EntryManifestLeaf & { name: string; content: string }>,
-): Record<string, any> {
-  const entries: Record<string, any> = {};
+): { entries: Record<string, FlatWorldbookEntry> } {
+  const entries: Record<string, FlatWorldbookEntry> = {};
   for (let i = 0; i < leaves.length; i++) {
     entries[i.toString()] = toFlatWorldbookEntry(leaves[i], i);
   }
